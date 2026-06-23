@@ -1,0 +1,21 @@
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${JWT_ISSUER_URI}
+
+mas:
+  base-url: ${MAS_BASE_URL}
+  context: ${MAS_CONTEXT:/tririga}
+  rest-api: ${MAS_REST_API:/html/en/default/rest/SSOConnect?userName={0}&adGroupName={1}}
+
+entra-id:
+  graph:
+    enabled: ${GRAPH_API_ENABLED:true}
+    api-version: v1.0
+
+logging:
+  level:
+    com.ecifm.saml.bridge: INFO
+    org.springframework.security: WARN

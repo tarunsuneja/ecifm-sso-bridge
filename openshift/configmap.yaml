@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ecifm-bridge-config
+  namespace: tririga
+data:
+  MAS_BASE_URL: "https://mas-tririga.apps.ocp.example.com"
+  MAS_CONTEXT: "/tririga"
+  MAS_REST_API: "/html/en/default/rest/SSOConnect?userName={0}&adGroupName={1}"
+  JWT_ISSUER_URI: "https://mas-sso.apps.ocp.example.com/auth/realms/mas"
+  GRAPH_API_ENABLED: "true"
+  SPRING_PROFILES_ACTIVE: "openshift"

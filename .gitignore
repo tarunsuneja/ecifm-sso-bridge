@@ -1,0 +1,17 @@
+# Build
+target/
+bin/
+*.jar
+*.war
+*.original
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env

@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ecifm-saml-bridge
+  namespace: tririga
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ecifm-saml-bridge
+  template:
+    metadata:
+      labels:
+        app: ecifm-saml-bridge
+    spec:
+      containers:
+        - name: bridge
+          image: image-registry.openshift-image-registry.svc:5000/tririga/ecifm-saml-bridge:latest
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: ecifm-bridge-config
+          env:
+            - name: MAS_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: ecifm-bridge-config
+                  key: MAS_BASE_URL
+            - name: JWT_ISSUER_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: ecifm-bridge-config
+                  key: JWT_ISSUER_URI
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
