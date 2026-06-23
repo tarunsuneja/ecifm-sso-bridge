@@ -204,49 +204,92 @@ docker images | findstr ecifm-saml-bridge
 
 ---
 
-## Step 5 — Deploy to OpenShift
+## Step 5 — Deploy to OpenShift (via Web Console)
 
-### 5a. Update configuration
+> **Before you start:** have your OpenShift cluster URL, project name, `MAS_BASE_URL`, and `JWT_ISSUER_URI` ready.
 
-Edit `openshift/configmap.yaml` with your actual environment values:
+---
 
-```yaml
-data:
-  MAS_BASE_URL: "https://<your-mas-host>"
-  JWT_ISSUER_URI: "https://<your-mas-sso-host>/auth/realms/<realm>"
-```
+### 5A. Import from Git (Recommended)
 
-### 5b. Push image to OpenShift registry
+This is the simplest path — OpenShift reads the repo, detects the `Dockerfile`, builds the image, and deploys.
+
+| Step | Action |
+|------|--------|
+| 1 | OpenShift Console → select your project → click **+Add** → **Import from Git** |
+| 2 | **Git Repo URL:** `https://github.com/ecifm-solutions/ecifm-saml-bridge.git` |
+| 3 | **Builder:** Select **Dockerfile** (do not select "Java") |
+| 4 | **Application Name:** `ecifm-saml-bridge` |
+| 5 | **Name:** `ecifm-saml-bridge` |
+| 6 | **Container Port:** `8080` |
+| 7 | Click **Advanced Options**, go to **Environment** tab |
+
+Add these environment variables:
+
+| Name | Value |
+|------|-------|
+| `MAS_BASE_URL` | `https://<your-mas-host>` |
+| `MAS_CONTEXT` | `/tririga` |
+| `JWT_ISSUER_URI` | `https://<your-mas-sso-host>/auth/realms/<realm>` |
+| `GRAPH_API_ENABLED` | `true` |
+| `SPRING_PROFILES_ACTIVE` | `openshift` |
+
+| 8 | Click **Create** — OpenShift builds the image and deploys automatically |
+| 9 | Go to **Networking → Routes** to find the auto-generated URL |
+
+> **Build troubleshooting:** Go to **Builds → BuildConfigs** → click your build → **Logs** tab to watch the Docker build.
+
+---
+
+### 5B. Deploy Existing Image (no Git)
+
+If you already have a Docker image in a registry (e.g. Docker Hub):
+
+| Step | Action |
+|------|--------|
+| 1 | OpenShift Console → **+Add** → **Container Images** |
+| 2 | **Image Name:** `yourdockerhub/ecifm-saml-bridge:latest` |
+| 3 | **Application Name:** `ecifm-saml-bridge` |
+| 4 | **Name:** `ecifm-saml-bridge` |
+| 5 | **Container Port:** `8080` |
+| 6 | Click **Advanced Options** → **Environment** → add the same env vars as 5A |
+| 7 | Click **Create** |
+
+---
+
+### 5C. Apply YAML Manually (fine-grained control)
+
+Import the `openshift/` manifests via the console **+** icon (top-right) in this order:
+
+1. `openshift/configmap.yaml` — Environment variables
+2. `openshift/deployment.yaml` — 2 replicas, health probes
+3. `openshift/service.yaml` — ClusterIP on port 8080
+4. `openshift/route.yaml` — Public HTTPS route (update hostname!)
+
+> **Important**: Edit `openshift/configmap.yaml` first with your real `MAS_BASE_URL`, `JWT_ISSUER_URI` values.
+
+---
+
+### 5D. Configure a Custom Route (optional)
+
+To use a friendly URL like `bridge.apps.ocp.example.com`:
+
+| Step | Action |
+|------|--------|
+| 1 | OpenShift Console → **Networking → Routes** → **Create Route** |
+| 2 | **Name:** `ecifm-saml-bridge` |
+| 3 | **Hostname:** `bridge.apps.ocp.example.com` |
+| 4 | **Service:** `ecifm-saml-bridge` |
+| 5 | **Target Port:** `8080 → 8080` |
+| 6 | **Security:** check _Secure Route_ → **Edge** TLS termination |
+| 7 | Click **Create** |
+
+---
+
+### 5E. Verify
 
 ```powershell
-# Login
-oc login --token=<token> --server=<api-server>
-
-# Create project (if not exists)
-oc new-project tririga
-
-# Login docker to OpenShift registry
-docker login -u $(oc whoami) -p $(oc whoami -t) image-registry.openshift-image-registry.svc:5000
-
-# Tag and push
-docker tag ecifm-saml-bridge:0.1.0 image-registry.openshift-image-registry.svc:5000/tririga/ecifm-saml-bridge:latest
-docker push image-registry.openshift-image-registry.svc:5000/tririga/ecifm-saml-bridge:latest
-```
-
-### 5c. Apply manifests
-
-```powershell
-# Deploy config, app, networking
-oc apply -f openshift/configmap.yaml
-oc apply -f openshift/deployment.yaml
-oc apply -f openshift/service.yaml
-oc apply -f openshift/route.yaml
-```
-
-### 5d. Verify
-
-```powershell
-# Check pods are running
+# Check pods are running (OpenShift Console → Workloads → Pods)
 oc get pods -w
 
 # Get the public URL
@@ -256,22 +299,21 @@ oc get route ecifm-saml-bridge
 curl https://<route-host>/test
 ```
 
-### Updating after changes
+Expected: `ecifm-saml-bridge is running`
+
+---
+
+### Updating After Code Changes
+
+When using **Import from Git (5A)**: push new code to the same branch — the BuildConfig automatically re-builds and re-deploys.
+
+For manual updates via **Container Images (5B)**:
 
 ```powershell
-# 1. Rebuild JAR
 mvn clean package -DskipTests
-
-# 2. Rebuild Docker image
 docker build -t ecifm-saml-bridge:0.1.0 .
-
-# 3. Push to OpenShift registry
-docker push image-registry.openshift-image-registry.svc:5000/tririga/ecifm-saml-bridge:latest
-
-# 4. Roll out new version
+docker push yourdockerhub/ecifm-saml-bridge:latest
 oc rollout restart deployment/ecifm-saml-bridge
-
-# 5. Watch rollout
 oc rollout status deployment/ecifm-saml-bridge
 ```
 
