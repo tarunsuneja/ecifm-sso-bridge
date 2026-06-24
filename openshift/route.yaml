@@ -1,15 +1,14 @@
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: ecifm-saml-bridge
-  namespace: tririga
+  name: ecifm-sso-bridge
   annotations:
     haproxy.router.openshift.io/rewrite-target: /
 spec:
   host: bridge.apps.ocp.example.com
   to:
     kind: Service
-    name: ecifm-saml-bridge
+    name: ecifm-sso-bridge
   tls:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect

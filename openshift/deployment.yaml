@@ -1,21 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ecifm-saml-bridge
-  namespace: tririga
+  name: ecifm-sso-bridge
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: ecifm-saml-bridge
+      app: ecifm-sso-bridge
   template:
     metadata:
       labels:
-        app: ecifm-saml-bridge
+        app: ecifm-sso-bridge
     spec:
       containers:
         - name: bridge
-          image: image-registry.openshift-image-registry.svc:5000/tririga/ecifm-saml-bridge:latest
+          image: image-registry.openshift-image-registry.svc:5000/tririga/ecifm-sso-bridge:latest
           ports:
             - containerPort: 8080
           envFrom:
