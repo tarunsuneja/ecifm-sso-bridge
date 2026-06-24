@@ -7,7 +7,7 @@
     </springProfile>
 
     <springProfile name="openshift">
-        <property name="APP_LOG_ROOT" value="/var/log/app"/>
+        <property name="APP_LOG_ROOT" value="/tmp/logs"/>
     </springProfile>
 
     <appender name="console" class="ch.qos.logback.core.ConsoleAppender">
