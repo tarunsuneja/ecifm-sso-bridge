@@ -3,14 +3,14 @@ package com.ecifm.saml.bridge.controller;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
-
-import jakarta.servlet.http.HttpServletResponse;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
@@ -55,41 +55,131 @@ public class AcsHandlerController {
     }
 
     @GetMapping("/redirect")
-    public ResponseEntity<Void> ssoRedirect(
+    public ResponseEntity<String> ssoRedirect(
             @AuthenticationPrincipal OidcUser oidcUser,
-            @RegisteredOAuth2AuthorizedClient("entra-id") OAuth2AuthorizedClient authorizedClient,
-            HttpServletResponse response) {
+            @RegisteredOAuth2AuthorizedClient("entra-id") OAuth2AuthorizedClient authorizedClient) {
+
+        String tririgaUrl = masBaseUrl + masContext;
 
         if (oidcUser == null || authorizedClient == null) {
-            log.warn("No authenticated user found - redirecting to MAS without sync");
-            return ResponseEntity.status(HttpStatus.FOUND)
-                    .header(HttpHeaders.LOCATION, masBaseUrl + masContext)
-                    .build();
+            return buildPage("Not Logged In", "",
+                    List.of(), null, tririgaUrl,
+                    "warning", "You are not authenticated. Please log in first.");
         }
 
         String email = extractEmail(oidcUser);
         String accessToken = authorizedClient.getAccessToken().getTokenValue();
         List<String> groups = extractGroupsFromAccessToken(accessToken);
 
+        if (groups.isEmpty()) {
+            log.info("No groups in access token, will use Graph API fallback in sync");
+        }
+
         log.info("SSO redirect for user: {}, groups: {}", email, groups);
 
         boolean syncSucceeded = masSyncService.syncUser(accessToken, email, groups);
 
-        if (!syncSucceeded) {
-            log.warn("SSOConnect did not complete successfully for user: {}", email);
-            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
+        String status;
+        String message;
+        if (syncSucceeded) {
+            status = "success";
+            message = "Groups synced successfully to TRIRIGA.";
+        } else {
+            status = "error";
+            message = "SSOConnect API returned an error. TRIRIGA SSO app may not be configured yet.";
         }
 
-        response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate, private, max-age=0");
-        response.setHeader("Pragma", "no-cache");
-        response.setDateHeader("Expires", 0);
+        return buildPage(email, accessToken, groups, syncSucceeded, tririgaUrl, status, message);
+    }
 
-        String redirectUrl = masBaseUrl + masContext;
-        log.info("Redirecting user to: {}", redirectUrl);
+    private ResponseEntity<String> buildPage(String email, String accessToken,
+                                              List<String> groups, Boolean syncSucceeded,
+                                              String tririgaUrl, String status, String message) {
+        String groupListHtml = groups.isEmpty()
+                ? "<li><em>No groups found in token</em></li>"
+                : groups.stream().map(g -> "<li>" + escapeHtml(g) + "</li>")
+                        .collect(Collectors.joining("\n"));
 
-        return ResponseEntity.status(HttpStatus.FOUND)
-                .header(HttpHeaders.LOCATION, redirectUrl)
-                .build();
+        String html = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>eCIFM SSO Bridge - Login Status</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+               background: #f5f7fa; color: #333; min-height: 100vh; display: flex;
+               justify-content: center; align-items: center; padding: 20px; }
+        .card { background: white; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.1);
+                max-width: 640px; width: 100%; overflow: hidden; }
+        .header { padding: 24px 28px; border-bottom: 1px solid #eee; }
+        .header h1 { font-size: 20px; font-weight: 600; }
+        .header .subtitle { font-size: 13px; color: #888; margin-top: 4px; }
+        .body { padding: 24px 28px; }
+        .badge { display: inline-block; padding: 6px 14px; border-radius: 20px;
+                 font-size: 13px; font-weight: 500; margin-bottom: 20px; }
+        .badge.success { background: #d4edda; color: #155724; }
+        .badge.error { background: #f8d7da; color: #721c24; }
+        .badge.warning { background: #fff3cd; color: #856404; }
+        .info-row { display: flex; padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
+        .info-row .label { width: 120px; font-weight: 500; font-size: 13px; color: #666; }
+        .info-row .value { flex: 1; font-size: 14px; word-break: break-all; }
+        .groups { margin-top: 16px; }
+        .groups h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+        .groups ul { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+        .groups ul li { background: #e9ecef; padding: 4px 12px; border-radius: 14px;
+                        font-size: 12px; color: #495057; }
+        .actions { margin-top: 24px; display: flex; gap: 12px; flex-wrap: wrap; }
+        .btn { display: inline-block; padding: 10px 24px; border-radius: 8px;
+               text-decoration: none; font-size: 14px; font-weight: 500;
+               transition: opacity 0.2s; }
+        .btn:hover { opacity: 0.85; }
+        .btn-primary { background: #0066cc; color: white; }
+        .btn-secondary { background: #6c757d; color: white; }
+        .footer { padding: 16px 28px; background: #fafbfc; border-top: 1px solid #eee;
+                  font-size: 12px; color: #999; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="header">
+            <h1>eCIFM SSO Bridge</h1>
+            <div class="subtitle">Microsoft Entra ID Authentication Status</div>
+        </div>
+        <div class="body">
+            <div class="badge """ + status + """">""" + message + """</div>
+            <div class="info-row">
+                <div class="label">Email</div>
+                <div class="value">""" + escapeHtml(email) + """</div>
+            </div>
+            <div class="info-row">
+                <div class="label">Provider</div>
+                <div class="value">Microsoft Entra ID</div>
+            </div>
+            <div class="info-row">
+                <div class="label">TRIRIGA URL</div>
+                <div class="value"><a href=\"""" + escapeHtml(tririgaUrl) + """\">""" + escapeHtml(tririgaUrl) + """</a></div>
+            </div>
+            <div class="groups">
+                <h3>Groups (\u0024""" + groups.size() + """)</h3>
+                <ul>
+                    """ + groupListHtml + """
+                </ul>
+            </div>
+            <div class="actions">
+                <a href=\"""" + escapeHtml(tririgaUrl) + """\" class="btn btn-primary">Go to TRIRIGA</a>
+                <a href="/" class="btn btn-secondary">Refresh</a>
+            </div>
+        </div>
+        <div class="footer">
+            eCIFM SSO Bridge &bull; Cluster: NPOS2
+        </div>
+    </div>
+</body>
+</html>""";
+        return ResponseEntity.ok().contentType(MediaType.TEXT_HTML).body(html);
     }
 
     private String extractEmail(OidcUser oidcUser) {
@@ -119,5 +209,15 @@ public class AcsHandlerController {
             log.warn("Failed to extract groups from access token: {}", e.getMessage());
         }
         return List.of();
+    }
+
+    private String escapeHtml(String input) {
+        if (input == null) return "";
+        return input
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 }
