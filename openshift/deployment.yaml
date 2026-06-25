@@ -31,6 +31,11 @@ spec:
                 configMapKeyRef:
                   name: ecifm-bridge-config
                   key: JWT_ISSUER_URI
+            - name: AZURE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: ecifm-bridge-secrets
+                  key: AZURE_CLIENT_SECRET
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness

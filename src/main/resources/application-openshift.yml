@@ -1,6 +1,18 @@
 spring:
   security:
     oauth2:
+      client:
+        registration:
+          entra-id:
+            client-id: ${AZURE_CLIENT_ID}
+            client-secret: ${AZURE_CLIENT_SECRET}
+            authorization-grant-type: authorization_code
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+            scope: openid, profile, email
+        provider:
+          entra-id:
+            issuer-uri: ${JWT_ISSUER_URI}
+            user-name-attribute: sub
       resourceserver:
         jwt:
           issuer-uri: ${JWT_ISSUER_URI}

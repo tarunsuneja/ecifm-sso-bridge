@@ -1,8 +1,9 @@
 package com.ecifm.saml.bridge.controller;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import org.slf4j.Logger;
@@ -12,11 +13,15 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
+import org.springframework.security.oauth2.client.annotation.RegisteredOAuth2AuthorizedClient;
+import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 
 import com.ecifm.saml.bridge.service.MasSyncService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Controller
 public class AcsHandlerController {
@@ -30,9 +35,11 @@ public class AcsHandlerController {
     private String masContext;
 
     private final MasSyncService masSyncService;
+    private final ObjectMapper objectMapper;
 
-    public AcsHandlerController(MasSyncService masSyncService) {
+    public AcsHandlerController(MasSyncService masSyncService, ObjectMapper objectMapper) {
         this.masSyncService = masSyncService;
+        this.objectMapper = objectMapper;
     }
 
     @GetMapping("/")
@@ -49,24 +56,24 @@ public class AcsHandlerController {
 
     @GetMapping("/redirect")
     public ResponseEntity<Void> ssoRedirect(
-            @AuthenticationPrincipal Jwt jwt,
-            HttpServletRequest request,
+            @AuthenticationPrincipal OidcUser oidcUser,
+            @RegisteredOAuth2AuthorizedClient("entra-id") OAuth2AuthorizedClient authorizedClient,
             HttpServletResponse response) {
 
-        if (jwt == null) {
-            log.warn("No JWT found in request - redirecting to MAS without sync");
+        if (oidcUser == null || authorizedClient == null) {
+            log.warn("No authenticated user found - redirecting to MAS without sync");
             return ResponseEntity.status(HttpStatus.FOUND)
                     .header(HttpHeaders.LOCATION, masBaseUrl + masContext)
                     .build();
         }
 
-        String email = extractEmail(jwt);
-        List<String> groups = extractGroups(jwt);
-        String bearerToken = jwt.getTokenValue();
+        String email = extractEmail(oidcUser);
+        String accessToken = authorizedClient.getAccessToken().getTokenValue();
+        List<String> groups = extractGroupsFromAccessToken(accessToken);
 
         log.info("SSO redirect for user: {}, groups: {}", email, groups);
 
-        boolean syncSucceeded = masSyncService.syncUser(bearerToken, email, groups);
+        boolean syncSucceeded = masSyncService.syncUser(accessToken, email, groups);
 
         if (!syncSucceeded) {
             log.warn("SSOConnect did not complete successfully for user: {}", email);
@@ -85,29 +92,32 @@ public class AcsHandlerController {
                 .build();
     }
 
-    private String extractEmail(Jwt jwt) {
-        String email = jwt.getClaimAsString("email");
+    private String extractEmail(OidcUser oidcUser) {
+        String email = oidcUser.getEmail();
         if (email == null || email.isBlank()) {
-            email = jwt.getClaimAsString("preferred_username");
+            email = oidcUser.getPreferredUsername();
         }
         if (email == null || email.isBlank()) {
-            email = jwt.getSubject();
+            email = oidcUser.getSubject();
         }
         return email;
     }
 
-    @SuppressWarnings("unchecked")
-    private List<String> extractGroups(Jwt jwt) {
-        List<String> groups = jwt.getClaimAsStringList("groups");
-        if (groups != null && !groups.isEmpty()) {
-            return groups;
+    private List<String> extractGroupsFromAccessToken(String accessToken) {
+        try {
+            String[] parts = accessToken.split("\\.");
+            if (parts.length < 2) {
+                return List.of();
+            }
+            String payload = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
+            JsonNode claims = objectMapper.readTree(payload);
+            JsonNode groupsNode = claims.get("groups");
+            if (groupsNode != null && groupsNode.isArray()) {
+                return objectMapper.convertValue(groupsNode, List.class);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to extract groups from access token: {}", e.getMessage());
         }
-
-        Object groupsClaim = jwt.getClaims().get("groups");
-        if (groupsClaim instanceof List) {
-            return (List<String>) groupsClaim;
-        }
-
         return List.of();
     }
 }
