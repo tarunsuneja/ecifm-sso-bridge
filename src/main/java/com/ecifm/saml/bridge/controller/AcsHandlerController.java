@@ -100,91 +100,87 @@ public class AcsHandlerController {
                 : groups.stream().map(g -> "<li>" + escapeHtml(g) + "</li>")
                         .collect(Collectors.joining("\n            "));
 
-        String html = String.format("""
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>eCIFM SSO Bridge - Login Status</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-               background: #f5f7fa; color: #333; min-height: 100vh; display: flex;
-               justify-content: center; align-items: center; padding: 20px; }
-        .card { background: white; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.1);
-                max-width: 640px; width: 100%; overflow: hidden; }
-        .header { padding: 24px 28px; border-bottom: 1px solid #eee; }
-        .header h1 { font-size: 20px; font-weight: 600; }
-        .header .subtitle { font-size: 13px; color: #888; margin-top: 4px; }
-        .body { padding: 24px 28px; }
-        .badge { display: inline-block; padding: 6px 14px; border-radius: 20px;
-                 font-size: 13px; font-weight: 500; margin-bottom: 20px; }
-        .badge.success { background: #d4edda; color: #155724; }
-        .badge.error { background: #f8d7da; color: #721c24; }
-        .badge.warning { background: #fff3cd; color: #856404; }
-        .info-row { display: flex; padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
-        .info-row .label { width: 120px; font-weight: 500; font-size: 13px; color: #666; }
-        .info-row .value { flex: 1; font-size: 14px; word-break: break-all; }
-        .groups { margin-top: 16px; }
-        .groups h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
-        .groups ul { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-        .groups ul li { background: #e9ecef; padding: 4px 12px; border-radius: 14px;
-                        font-size: 12px; color: #495057; }
-        .actions { margin-top: 24px; display: flex; gap: 12px; flex-wrap: wrap; }
-        .btn { display: inline-block; padding: 10px 24px; border-radius: 8px;
-               text-decoration: none; font-size: 14px; font-weight: 500;
-               transition: opacity 0.2s; }
-        .btn:hover { opacity: 0.85; }
-        .btn-primary { background: #0066cc; color: white; }
-        .btn-secondary { background: #6c757d; color: white; }
-        .footer { padding: 16px 28px; background: #fafbfc; border-top: 1px solid #eee;
-                  font-size: 12px; color: #999; text-align: center; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <div class="header">
-            <h1>eCIFM SSO Bridge</h1>
-            <div class="subtitle">Microsoft Entra ID Authentication Status</div>
-        </div>
-        <div class="body">
-            <div class="badge %s">%s</div>
-            <div class="info-row">
-                <div class="label">Email</div>
-                <div class="value">%s</div>
-            </div>
-            <div class="info-row">
-                <div class="label">Provider</div>
-                <div class="value">Microsoft Entra ID</div>
-            </div>
-            <div class="info-row">
-                <div class="label">TRIRIGA URL</div>
-                <div class="value"><a href="%s">%s</a></div>
-            </div>
-            <div class="groups">
-                <h3>Groups (%d)</h3>
-                <ul>
-                    %s
-                </ul>
-            </div>
-            <div class="actions">
-                <a href="%s" class="btn btn-primary">Go to TRIRIGA</a>
-                <a href="/" class="btn btn-secondary">Refresh</a>
-            </div>
-        </div>
-        <div class="footer">
-            eCIFM SSO Bridge \u2022 Cluster: NPOS2
-        </div>
-    </div>
-</body>
-</html>""",
-                status, message,
-                escapeHtml(email),
-                escapeHtml(tririgaUrl), escapeHtml(tririgaUrl),
-                groups.size(),
-                groupListHtml,
-                escapeHtml(tririgaUrl));
+        String sanitizedEmail = escapeHtml(email);
+        String sanitizedUrl = escapeHtml(tririgaUrl);
+
+        String html = "<!DOCTYPE html>\n" +
+                "<html lang=\"en\">\n" +
+                "<head>\n" +
+                "    <meta charset=\"UTF-8\">\n" +
+                "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n" +
+                "    <title>eCIFM SSO Bridge - Login Status</title>\n" +
+                "    <style>\n" +
+                "        * { margin: 0; padding: 0; box-sizing: border-box; }\n" +
+                "        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n" +
+                "               background: #f5f7fa; color: #333; min-height: 100vh; display: flex;\n" +
+                "               justify-content: center; align-items: center; padding: 20px; }\n" +
+                "        .card { background: white; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.1);\n" +
+                "                max-width: 640px; width: 100%; overflow: hidden; }\n" +
+                "        .header { padding: 24px 28px; border-bottom: 1px solid #eee; }\n" +
+                "        .header h1 { font-size: 20px; font-weight: 600; }\n" +
+                "        .header .subtitle { font-size: 13px; color: #888; margin-top: 4px; }\n" +
+                "        .body { padding: 24px 28px; }\n" +
+                "        .badge { display: inline-block; padding: 6px 14px; border-radius: 20px;\n" +
+                "                 font-size: 13px; font-weight: 500; margin-bottom: 20px; }\n" +
+                "        .badge.success { background: #d4edda; color: #155724; }\n" +
+                "        .badge.error { background: #f8d7da; color: #721c24; }\n" +
+                "        .badge.warning { background: #fff3cd; color: #856404; }\n" +
+                "        .info-row { display: flex; padding: 10px 0; border-bottom: 1px solid #f0f0f0; }\n" +
+                "        .info-row .label { width: 120px; font-weight: 500; font-size: 13px; color: #666; }\n" +
+                "        .info-row .value { flex: 1; font-size: 14px; word-break: break-all; }\n" +
+                "        .groups { margin-top: 16px; }\n" +
+                "        .groups h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }\n" +
+                "        .groups ul { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }\n" +
+                "        .groups ul li { background: #e9ecef; padding: 4px 12px; border-radius: 14px;\n" +
+                "                        font-size: 12px; color: #495057; }\n" +
+                "        .actions { margin-top: 24px; display: flex; gap: 12px; flex-wrap: wrap; }\n" +
+                "        .btn { display: inline-block; padding: 10px 24px; border-radius: 8px;\n" +
+                "               text-decoration: none; font-size: 14px; font-weight: 500;\n" +
+                "               transition: opacity 0.2s; }\n" +
+                "        .btn:hover { opacity: 0.85; }\n" +
+                "        .btn-primary { background: #0066cc; color: white; }\n" +
+                "        .btn-secondary { background: #6c757d; color: white; }\n" +
+                "        .footer { padding: 16px 28px; background: #fafbfc; border-top: 1px solid #eee;\n" +
+                "                  font-size: 12px; color: #999; text-align: center; }\n" +
+                "    </style>\n" +
+                "</head>\n" +
+                "<body>\n" +
+                "    <div class=\"card\">\n" +
+                "        <div class=\"header\">\n" +
+                "            <h1>eCIFM SSO Bridge</h1>\n" +
+                "            <div class=\"subtitle\">Microsoft Entra ID Authentication Status</div>\n" +
+                "        </div>\n" +
+                "        <div class=\"body\">\n" +
+                "            <div class=\"badge " + status + "\">" + message + "</div>\n" +
+                "            <div class=\"info-row\">\n" +
+                "                <div class=\"label\">Email</div>\n" +
+                "                <div class=\"value\">" + sanitizedEmail + "</div>\n" +
+                "            </div>\n" +
+                "            <div class=\"info-row\">\n" +
+                "                <div class=\"label\">Provider</div>\n" +
+                "                <div class=\"value\">Microsoft Entra ID</div>\n" +
+                "            </div>\n" +
+                "            <div class=\"info-row\">\n" +
+                "                <div class=\"label\">TRIRIGA URL</div>\n" +
+                "                <div class=\"value\"><a href=\"" + sanitizedUrl + "\">" + sanitizedUrl + "</a></div>\n" +
+                "            </div>\n" +
+                "            <div class=\"groups\">\n" +
+                "                <h3>Groups (" + groups.size() + ")</h3>\n" +
+                "                <ul>\n" +
+                "                    " + groupListHtml + "\n" +
+                "                </ul>\n" +
+                "            </div>\n" +
+                "            <div class=\"actions\">\n" +
+                "                <a href=\"" + sanitizedUrl + "\" class=\"btn btn-primary\">Go to TRIRIGA</a>\n" +
+                "                <a href=\"/\" class=\"btn btn-secondary\">Refresh</a>\n" +
+                "            </div>\n" +
+                "        </div>\n" +
+                "        <div class=\"footer\">\n" +
+                "            eCIFM SSO Bridge &bull; Cluster: NPOS2\n" +
+                "        </div>\n" +
+                "    </div>\n" +
+                "</body>\n" +
+                "</html>";
 
         return ResponseEntity.ok().contentType(MediaType.TEXT_HTML).body(html);
     }
