@@ -98,9 +98,9 @@ public class AcsHandlerController {
         String groupListHtml = groups.isEmpty()
                 ? "<li><em>No groups found in token</em></li>"
                 : groups.stream().map(g -> "<li>" + escapeHtml(g) + "</li>")
-                        .collect(Collectors.joining("\n"));
+                        .collect(Collectors.joining("\n            "));
 
-        String html = """
+        String html = String.format("""
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -149,10 +149,10 @@ public class AcsHandlerController {
             <div class="subtitle">Microsoft Entra ID Authentication Status</div>
         </div>
         <div class="body">
-            <div class="badge """ + status + """">""" + message + """</div>
+            <div class="badge %s">%s</div>
             <div class="info-row">
                 <div class="label">Email</div>
-                <div class="value">""" + escapeHtml(email) + """</div>
+                <div class="value">%s</div>
             </div>
             <div class="info-row">
                 <div class="label">Provider</div>
@@ -160,25 +160,32 @@ public class AcsHandlerController {
             </div>
             <div class="info-row">
                 <div class="label">TRIRIGA URL</div>
-                <div class="value"><a href=\"""" + escapeHtml(tririgaUrl) + """\">""" + escapeHtml(tririgaUrl) + """</a></div>
+                <div class="value"><a href="%s">%s</a></div>
             </div>
             <div class="groups">
-                <h3>Groups (\u0024""" + groups.size() + """)</h3>
+                <h3>Groups (%d)</h3>
                 <ul>
-                    """ + groupListHtml + """
+                    %s
                 </ul>
             </div>
             <div class="actions">
-                <a href=\"""" + escapeHtml(tririgaUrl) + """\" class="btn btn-primary">Go to TRIRIGA</a>
+                <a href="%s" class="btn btn-primary">Go to TRIRIGA</a>
                 <a href="/" class="btn btn-secondary">Refresh</a>
             </div>
         </div>
         <div class="footer">
-            eCIFM SSO Bridge &bull; Cluster: NPOS2
+            eCIFM SSO Bridge \u2022 Cluster: NPOS2
         </div>
     </div>
 </body>
-</html>""";
+</html>""",
+                status, message,
+                escapeHtml(email),
+                escapeHtml(tririgaUrl), escapeHtml(tririgaUrl),
+                groups.size(),
+                groupListHtml,
+                escapeHtml(tririgaUrl));
+
         return ResponseEntity.ok().contentType(MediaType.TEXT_HTML).body(html);
     }
 
