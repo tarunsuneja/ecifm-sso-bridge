@@ -96,25 +96,30 @@ public class AcsHandlerController {
     public ResponseEntity<String> localTestRaw() {
         try {
             String endpoint = masBaseUrl.trim() + "/ws/TririgaWS";
-            String soapRequest = "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n" +
-"  <soap:Body>\n" +
+            String soapRequest = "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"http://schemas.xmlsoap.org/soap/envelope/\">\n" +
+"  <SOAP-ENV:Body>\n" +
 "    <getApplicationInfo xmlns=\"http://ws.tririga.com\"/>\n" +
-"  </soap:Body>\n" +
-"</soap:Envelope>";
+"  </SOAP-ENV:Body>\n" +
+"</SOAP-ENV:Envelope>";
 
             HttpURLConnection conn = (HttpURLConnection) URI.create(endpoint).toURL().openConnection();
             conn.setRequestMethod("POST");
-            conn.setRequestProperty("Content-Type", "application/soap+xml; charset=utf-8");
+            conn.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
+            conn.setRequestProperty("SOAPAction", "");
             // HTTP Basic Auth
             String auth = "tarun.suneja@ecifm.com:TR@maspassword2!";
             String encoded = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
             conn.setRequestProperty("Authorization", "Basic " + encoded);
             conn.setDoOutput(true);
+            conn.setDoInput(true);
+            conn.setUseCaches(false);
+            conn.setInstanceFollowRedirects(false);
             conn.setConnectTimeout(30000);
             conn.setReadTimeout(120000);
 
             try (OutputStream os = conn.getOutputStream()) {
                 os.write(soapRequest.getBytes(StandardCharsets.UTF_8));
+                os.flush();
             }
 
             int responseCode = conn.getResponseCode();
