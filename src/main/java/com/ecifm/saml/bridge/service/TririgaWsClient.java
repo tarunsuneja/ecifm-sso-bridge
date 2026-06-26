@@ -4,30 +4,32 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.net.URL;
 import java.security.cert.X509Certificate;
-import java.util.Base64;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
+import javax.xml.namespace.QName;
 
+import org.apache.cxf.binding.soap.SoapHeader;
 import org.apache.cxf.configuration.jsse.TLSClientParameters;
 import org.apache.cxf.endpoint.Client;
 import org.apache.cxf.frontend.ClientProxy;
+import org.apache.cxf.headers.Header;
+import org.apache.cxf.jaxb.JAXBDataBinding;
 import org.apache.cxf.transport.http.HTTPConduit;
 import org.apache.cxf.transports.http.configuration.HTTPClientPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
 
 import com.ecifm.saml.bridge.tririga.generated.dto.ApplicationInfo;
 import com.ecifm.saml.bridge.tririga.generated.ws.TririgaWS;
 import com.ecifm.saml.bridge.tririga.generated.ws.TririgaWSPortType;
 
 import jakarta.xml.ws.BindingProvider;
-import jakarta.xml.ws.handler.MessageContext;
 
 @Component
 public class TririgaWsClient {
@@ -93,11 +95,19 @@ public class TririgaWsClient {
         bp.getRequestContext().put(BindingProvider.ENDPOINT_ADDRESS_PROPERTY, endpoint);
         bp.getRequestContext().put(BindingProvider.SESSION_MAINTAIN_PROPERTY, Boolean.TRUE);
 
-        Map<String, List<String>> headers = (Map<String, List<String>>)
-                bp.getRequestContext().computeIfAbsent(MessageContext.HTTP_REQUEST_HEADERS,
-                        k -> new LinkedHashMap<String, List<String>>());
-        headers.put("Username", List.of(tririgaUsername.trim()));
-        headers.put("Password", List.of(tririgaPassword));
+        Document doc = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
+        Element challenge = doc.createElementNS("http://soap-authentication.org/basic/2001/10/", "h:BasicChallenge");
+        challenge.setAttributeNS("http://schemas.xmlsoap.org/soap/envelope/", "soap:mustUnderstand", "1");
+        Element userName = doc.createElement("UserName");
+        userName.setTextContent(tririgaUsername.trim());
+        challenge.appendChild(userName);
+        Element password = doc.createElement("Password");
+        password.setTextContent(tririgaPassword);
+        challenge.appendChild(password);
+        List<Header> headerList = List.of(new SoapHeader(
+                new QName("http://soap-authentication.org/basic/2001/10/", "BasicChallenge", "h"), challenge));
+        bp.getRequestContext().put(Header.HEADER_LIST, headerList);
+        log.info("Added SOAP BasicChallenge header for user '{}'", tririgaUsername);
 
         Client client = ClientProxy.getClient(port);
         HTTPConduit conduit = (HTTPConduit) client.getConduit();
@@ -119,7 +129,7 @@ public class TririgaWsClient {
         });
         conduit.setTlsClientParameters(tls);
 
-        log.info("CXF client configured with Username/Password for user '{}'", tririgaUsername);
+        log.info("CXF client configured with SOAP BasicChallenge for user '{}'", tririgaUsername);
         return port;
     }
 
