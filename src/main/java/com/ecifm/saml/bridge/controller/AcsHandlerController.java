@@ -27,6 +27,7 @@ import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 
+import com.ecifm.saml.bridge.service.MasSyncService;
 import com.ecifm.saml.bridge.service.TririgaWsClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -42,6 +43,7 @@ public class AcsHandlerController {
     @Value("${mas.context}")
     private String masContext;
 
+    private final MasSyncService masSyncService;
     private final TririgaWsClient tririgaWsClient;
     private final ObjectMapper objectMapper;
 
@@ -51,7 +53,8 @@ public class AcsHandlerController {
     @Value("${tririga.password}")
     private String tririgaPassword;
 
-    public AcsHandlerController(TririgaWsClient tririgaWsClient, ObjectMapper objectMapper) {
+    public AcsHandlerController(MasSyncService masSyncService, TririgaWsClient tririgaWsClient, ObjectMapper objectMapper) {
+        this.masSyncService = masSyncService;
         this.tririgaWsClient = tririgaWsClient;
         this.objectMapper = objectMapper;
     }
@@ -296,12 +299,41 @@ public class AcsHandlerController {
     }
 
     @GetMapping("/redirect")
-    public ResponseEntity<Void> ssoRedirect() {
+    public ResponseEntity<String> ssoRedirect(
+            @AuthenticationPrincipal OidcUser oidcUser,
+            @RegisteredOAuth2AuthorizedClient("entra-id") OAuth2AuthorizedClient authorizedClient) {
+
         String tririgaUrl = masBaseUrl + masContext;
-        log.info("Redirecting to TRIRIGA: {}", tririgaUrl);
-        return ResponseEntity.status(HttpStatus.FOUND)
-                .header(HttpHeaders.LOCATION, tririgaUrl)
-                .build();
+
+        if (oidcUser == null || authorizedClient == null) {
+            return buildPage("Not Logged In", "",
+                    List.of(), null, tririgaUrl,
+                    "warning", "You are not authenticated. Please log in first.");
+        }
+
+        String email = extractEmail(oidcUser);
+        String accessToken = authorizedClient.getAccessToken().getTokenValue();
+        List<String> groups = extractGroupsFromAccessToken(accessToken);
+
+        if (groups.isEmpty()) {
+            log.info("No groups in access token, will use Graph API fallback in sync");
+        }
+
+        log.info("SSO redirect for user: {}, groups: {}", email, groups);
+
+        boolean syncSucceeded = masSyncService.syncUser(accessToken, email, groups);
+
+        String status;
+        String message;
+        if (syncSucceeded) {
+            status = "success";
+            message = "Groups synced successfully to TRIRIGA.";
+        } else {
+            status = "error";
+            message = "SSOConnect API returned an error. TRIRIGA SSO app may not be configured yet.";
+        }
+
+        return buildPage(email, accessToken, groups, syncSucceeded, tririgaUrl, status, message);
     }
 
     private ResponseEntity<String> buildPage(String email, String accessToken,
