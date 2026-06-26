@@ -71,6 +71,14 @@ public class AcsHandlerController {
                 .body("User: " + email + "\n\nSOAP Response:\n" + result);
     }
 
+    @GetMapping("/local/test-soap")
+    public ResponseEntity<String> localTestSoap() {
+        String result = tririgaWsClient.getApplicationInfo();
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_PLAIN)
+                .body("SOAP Response:\n" + result);
+    }
+
     @GetMapping("/redirect")
     public ResponseEntity<String> ssoRedirect(
             @AuthenticationPrincipal OidcUser oidcUser,

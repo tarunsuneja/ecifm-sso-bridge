@@ -28,7 +28,7 @@ public class SecurityConfig {
     public SecurityFilterChain oauth2LoginFilterChain(HttpSecurity http) throws Exception {
         http.authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health/**", "/actuator/health").permitAll()
-                        .requestMatchers("/test").permitAll()
+                        .requestMatchers("/test", "/test-soap").permitAll()
                         .anyRequest().authenticated())
                 .oauth2Login(oauth2 -> oauth2
                         .loginPage("/oauth2/authorization/entra-id"))

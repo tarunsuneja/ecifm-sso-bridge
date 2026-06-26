@@ -13,10 +13,6 @@ spring:
           entra-id:
             issuer-uri: ${JWT_ISSUER_URI}
             user-name-attribute: sub
-      resourceserver:
-        jwt:
-          issuer-uri: ${JWT_ISSUER_URI}
-
 mas:
   base-url: ${MAS_BASE_URL}
   context: ${MAS_CONTEXT:/tririga}
