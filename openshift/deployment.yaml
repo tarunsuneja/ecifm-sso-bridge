@@ -36,6 +36,11 @@ spec:
                 secretKeyRef:
                   name: ecifm-bridge-secrets
                   key: AZURE_CLIENT_SECRET
+            - name: TRIRIGA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ecifm-bridge-secrets
+                  key: TRIRIGA_PASSWORD
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
