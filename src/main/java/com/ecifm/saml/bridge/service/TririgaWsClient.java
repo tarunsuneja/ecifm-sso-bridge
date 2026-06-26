@@ -97,8 +97,7 @@ public class TririgaWsClient {
 
         Document doc = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
         Element challenge = doc.createElementNS("http://soap-authentication.org/basic/2001/10/", "h:BasicChallenge");
-        challenge.setAttributeNS("http://schemas.xmlsoap.org/soap/envelope/", "SOAP-ENV:mustUnderstand", "1");
-        Element userName = doc.createElement("UserName");
+        Element userName = doc.createElement("Username");
         userName.setTextContent(tririgaUsername.trim());
         challenge.appendChild(userName);
         Element password = doc.createElement("Password");

@@ -99,8 +99,8 @@ public class AcsHandlerController {
             String soapRequest = "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"http://schemas.xmlsoap.org/soap/envelope/\"\n" +
 "    xmlns:h=\"http://soap-authentication.org/basic/2001/10/\">\n" +
 "  <SOAP-ENV:Header>\n" +
-"    <h:BasicChallenge SOAP-ENV:mustUnderstand=\"1\">\n" +
-"      <UserName>" + tririgaUsername.trim() + "</UserName>\n" +
+"    <h:BasicChallenge>\n" +
+"      <Username>" + tririgaUsername.trim() + "</Username>\n" +
 "      <Password>" + tririgaPassword + "</Password>\n" +
 "    </h:BasicChallenge>\n" +
 "  </SOAP-ENV:Header>\n" +
