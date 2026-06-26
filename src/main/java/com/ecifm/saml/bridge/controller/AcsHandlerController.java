@@ -96,15 +96,7 @@ public class AcsHandlerController {
     public ResponseEntity<String> localTestRaw() {
         try {
             String endpoint = masBaseUrl.trim() + "/ws/TririgaWS";
-            // Try format: Username/Password with h namespace prefix
-            String soapRequest = "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"http://schemas.xmlsoap.org/soap/envelope/\"\n" +
-"    xmlns:h=\"http://soap-authentication.org/basic/2001/10/\">\n" +
-"  <SOAP-ENV:Header>\n" +
-"    <h:BasicChallenge>\n" +
-"      <h:Username>tarun.suneja@ecifm.com</h:Username>\n" +
-"      <h:Password>TR@maspassword2!</h:Password>\n" +
-"    </h:BasicChallenge>\n" +
-"  </SOAP-ENV:Header>\n" +
+            String soapRequest = "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"http://schemas.xmlsoap.org/soap/envelope/\">\n" +
 "  <SOAP-ENV:Body>\n" +
 "    <getApplicationInfo xmlns=\"http://ws.tririga.com\"/>\n" +
 "  </SOAP-ENV:Body>\n" +
@@ -114,8 +106,6 @@ public class AcsHandlerController {
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
             conn.setRequestProperty("SOAPAction", "");
-            conn.setRequestProperty("Username", tririgaUsername.trim());
-            conn.setRequestProperty("Password", tririgaPassword);
             conn.setDoOutput(true);
             conn.setConnectTimeout(30000);
             conn.setReadTimeout(120000);
