@@ -79,8 +79,9 @@ public class TririgaWsClient {
 
     @SuppressWarnings("unchecked")
     private TririgaWSPortType createPort() throws Exception {
-        String ctx = masContext == null ? "" : masContext.replaceAll("^/+|/+$", "");
-        String endpoint = ctx.isEmpty() ? masBaseUrl + "/ws/TririgaWS" : masBaseUrl + "/" + ctx + "/ws/TririgaWS";
+        String ctx = masContext == null ? "" : masContext.trim().replaceAll("^/+|/+$", "");
+        String rawUrl = ctx.isEmpty() ? masBaseUrl + "/ws/TririgaWS" : masBaseUrl + "/" + ctx + "/ws/TririgaWS";
+        String endpoint = rawUrl.trim();
         log.info("Creating CXF client for endpoint: {}", endpoint);
 
         URL wsdlUrl = getClass().getResource(WSDL_RESOURCE);
