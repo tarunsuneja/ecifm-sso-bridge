@@ -115,8 +115,10 @@ public class AcsHandlerController {
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
             conn.setRequestProperty("SOAPAction", "");
-            conn.setRequestProperty("Username", tririgaUsername.trim());
-            conn.setRequestProperty("Password", tririgaPassword);
+            // HTTP Basic Auth
+            String auth = "tarun.suneja@ecifm.com:TR@maspassword2!";
+            String encoded = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+            conn.setRequestProperty("Authorization", "Basic " + encoded);
             conn.setDoOutput(true);
             conn.setConnectTimeout(30000);
             conn.setReadTimeout(120000);
