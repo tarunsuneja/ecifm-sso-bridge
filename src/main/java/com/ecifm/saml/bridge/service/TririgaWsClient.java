@@ -1,7 +1,9 @@
 package com.ecifm.saml.bridge.service;
 
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
+import java.util.Base64;
 
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
@@ -46,8 +48,11 @@ public class TririgaWsClient {
     @Value("${mas.context}")
     private String masContext;
 
-    @Value("${mas-core.api-key:}")
-    private String apiKey;
+    @Value("${tririga.username}")
+    private String tririgaUsername;
+
+    @Value("${tririga.password}")
+    private String tririgaPassword;
 
     private final RestTemplate restTemplate;
 
@@ -56,7 +61,7 @@ public class TririgaWsClient {
         disableSslVerification();
     }
 
-    public String getApplicationInfo(String bearerToken) {
+    public String getApplicationInfo() {
         String soapUrl = masBaseUrl + masContext + "/ws/TririgaWS";
         log.info("TririgaWS SOAP URL: {}", soapUrl);
 
@@ -64,30 +69,23 @@ public class TririgaWsClient {
 
         // Attempt 1: No auth + SOAP 1.1
         report.append("=== Attempt 1: No Auth + SOAP 1.1 ===\n");
-        report.append(tryCall(soapUrl, null, null, SOAP11_ENVELOPE, "text/xml", "urn:getApplicationInfo"));
+        report.append(tryCall(soapUrl, null, SOAP11_ENVELOPE, "text/xml", "urn:getApplicationInfo"));
         report.append("\n\n");
 
-        // Attempt 2: Bearer token + SOAP 1.2 (application/soap+xml)
-        report.append("=== Attempt 2: Bearer + SOAP 1.2 ===\n");
-        report.append(tryCall(soapUrl, bearerToken, null, null, "application/soap+xml", null));
+        // Attempt 2: Basic Auth + SOAP 1.2 (application/soap+xml)
+        report.append("=== Attempt 2: Basic Auth + SOAP 1.2 ===\n");
+        report.append(tryCall(soapUrl, basicAuthHeader(), null, "application/soap+xml", null));
         report.append("\n\n");
 
-        // Attempt 3: Bearer token + SOAP 1.1 (text/xml + SOAPAction)
-        report.append("=== Attempt 3: Bearer + SOAP 1.1 ===\n");
-        report.append(tryCall(soapUrl, bearerToken, null, SOAP11_ENVELOPE, "text/xml", "urn:getApplicationInfo"));
+        // Attempt 3: Basic Auth + SOAP 1.1 (text/xml + SOAPAction)
+        report.append("=== Attempt 3: Basic Auth + SOAP 1.1 ===\n");
+        report.append(tryCall(soapUrl, basicAuthHeader(), SOAP11_ENVELOPE, "text/xml", "urn:getApplicationInfo"));
         report.append("\n\n");
-
-        // Attempt 4: API key + SOAP 1.1
-        if (apiKey != null && !apiKey.isEmpty()) {
-            report.append("=== Attempt 4: API Key + SOAP 1.1 ===\n");
-            report.append(tryCall(soapUrl, null, apiKey, SOAP11_ENVELOPE, "text/xml", "urn:getApplicationInfo"));
-            report.append("\n\n");
-        }
 
         return report.toString();
     }
 
-    private String tryCall(String url, String bearerToken, String apiKeyValue,
+    private String tryCall(String url, String authHeader,
                            String envelope, String contentType, String soapAction) {
         if (envelope == null) {
             envelope = SOAP12_ENVELOPE;
@@ -95,11 +93,8 @@ public class TririgaWsClient {
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.parseMediaType(contentType));
-            if (bearerToken != null) {
-                headers.setBearerAuth(bearerToken);
-            }
-            if (apiKeyValue != null && !apiKeyValue.isEmpty()) {
-                headers.set("x-api-key", apiKeyValue);
+            if (authHeader != null) {
+                headers.set("Authorization", authHeader);
             }
             if (soapAction != null) {
                 headers.set("SOAPAction", soapAction);
@@ -112,6 +107,11 @@ public class TririgaWsClient {
             log.warn("SOAP failed: {}", e.getMessage());
             return "Failed: " + e.getMessage();
         }
+    }
+
+    private String basicAuthHeader() {
+        String raw = tririgaUsername + ":" + tririgaPassword;
+        return "Basic " + Base64.getEncoder().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
     }
 
     private static void disableSslVerification() {

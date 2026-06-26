@@ -10,4 +10,4 @@ data:
   GRAPH_API_ENABLED: "true"
   SPRING_PROFILES_ACTIVE: "openshift"
   AZURE_CLIENT_ID: "31f536f1-10ee-4157-8a55-69d207b07e32"
-  MAS_CORE_API_KEY: ""
+  TRIRIGA_USERNAME: "tarun.suneja@ecifm.com"

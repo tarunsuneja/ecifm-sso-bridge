@@ -65,8 +65,7 @@ public class AcsHandlerController {
             return ResponseEntity.ok("Not authenticated. Visit /redirect first.");
         }
         String email = extractEmail(oidcUser);
-        String accessToken = authorizedClient.getAccessToken().getTokenValue();
-        String result = tririgaWsClient.getApplicationInfo(accessToken);
+        String result = tririgaWsClient.getApplicationInfo();
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_PLAIN)
                 .body("User: " + email + "\n\nSOAP Response:\n" + result);
