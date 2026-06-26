@@ -100,8 +100,8 @@ public class AcsHandlerController {
 "    xmlns:h=\"http://soap-authentication.org/basic/2001/10/\">\n" +
 "  <SOAP-ENV:Header>\n" +
 "    <h:BasicChallenge>\n" +
-"      <Username>" + tririgaUsername.trim() + "</Username>\n" +
-"      <Password>" + tririgaPassword + "</Password>\n" +
+"      <Username>tarun.suneja@ecifm.com</Username>\n" +
+"      <Password>TR@maspassword2!</Password>\n" +
 "    </h:BasicChallenge>\n" +
 "  </SOAP-ENV:Header>\n" +
 "  <SOAP-ENV:Body>\n" +
