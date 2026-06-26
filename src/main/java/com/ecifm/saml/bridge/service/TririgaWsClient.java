@@ -3,8 +3,12 @@ package com.ecifm.saml.bridge.service;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.net.URL;
+import java.security.cert.X509Certificate;
 import java.util.List;
 import java.util.Map;
+
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 
 import org.apache.cxf.configuration.jsse.TLSClientParameters;
 import org.apache.cxf.endpoint.Client;
@@ -103,6 +107,13 @@ public class TririgaWsClient {
 
         TLSClientParameters tls = new TLSClientParameters();
         tls.setDisableCNCheck(true);
+        tls.setTrustManagers(new TrustManager[]{
+            new X509TrustManager() {
+                public void checkClientTrusted(X509Certificate[] certs, String authType) {}
+                public void checkServerTrusted(X509Certificate[] certs, String authType) {}
+                public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+            }
+        });
         conduit.setTlsClientParameters(tls);
 
         log.info("CXF client configured with Username/Password for user '{}'", tririgaUsername);
