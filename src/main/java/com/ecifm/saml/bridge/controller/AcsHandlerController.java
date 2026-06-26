@@ -96,18 +96,18 @@ public class AcsHandlerController {
     public ResponseEntity<String> localTestRaw() {
         try {
             String endpoint = masBaseUrl.trim() + "/ws/TririgaWS";
-            String soapRequest = "<soap:Envelope xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\"\n" +
+            String soapRequest = "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"http://schemas.xmlsoap.org/soap/envelope/\"\n" +
 "    xmlns:h=\"http://soap-authentication.org/basic/2001/10/\">\n" +
-"  <soap:Header>\n" +
-"    <h:BasicChallenge soap:mustUnderstand=\"1\">\n" +
+"  <SOAP-ENV:Header>\n" +
+"    <h:BasicChallenge SOAP-ENV:mustUnderstand=\"1\">\n" +
 "      <UserName>" + tririgaUsername.trim() + "</UserName>\n" +
 "      <Password>" + tririgaPassword + "</Password>\n" +
 "    </h:BasicChallenge>\n" +
-"  </soap:Header>\n" +
-"  <soap:Body>\n" +
+"  </SOAP-ENV:Header>\n" +
+"  <SOAP-ENV:Body>\n" +
 "    <getApplicationInfo xmlns=\"http://ws.tririga.com\"/>\n" +
-"  </soap:Body>\n" +
-"</soap:Envelope>";
+"  </SOAP-ENV:Body>\n" +
+"</SOAP-ENV:Envelope>";
 
             HttpURLConnection conn = (HttpURLConnection) URI.create(endpoint).toURL().openConnection();
             conn.setRequestMethod("POST");
