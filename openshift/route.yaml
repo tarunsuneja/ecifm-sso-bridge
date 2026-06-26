@@ -5,8 +5,8 @@ metadata:
   labels:
     app: ecifm-sso-bridge
 spec:
-  host: main.facilities.inst1.apps.npos2.ecifmdev.net
-  path: /tririga
+  host: ecifm-sso-bridge-ecifm-sso-bridge.apps.npos2.ecifmdev.net
+  path: /
   to:
     kind: Service
     name: ecifm-sso-bridge
