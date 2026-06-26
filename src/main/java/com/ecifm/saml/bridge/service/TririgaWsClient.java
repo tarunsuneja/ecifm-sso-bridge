@@ -12,8 +12,6 @@ import java.util.Map;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 
-import jakarta.xml.ws.handler.MessageContext;
-
 import org.apache.cxf.configuration.jsse.TLSClientParameters;
 import org.apache.cxf.endpoint.Client;
 import org.apache.cxf.frontend.ClientProxy;
@@ -109,11 +107,6 @@ public class TririgaWsClient {
         policy.setReceiveTimeout(120_000);
         policy.setAllowChunking(false);
         conduit.setClient(policy);
-        org.apache.cxf.configuration.security.AuthorizationPolicy auth =
-                new org.apache.cxf.configuration.security.AuthorizationPolicy();
-        auth.setUserName(tririgaUsername.trim());
-        auth.setPassword(tririgaPassword);
-        conduit.setAuthorization(auth);
 
         TLSClientParameters tls = new TLSClientParameters();
         tls.setDisableCNCheck(true);
