@@ -96,25 +96,15 @@ public class AcsHandlerController {
     public ResponseEntity<String> localTestRaw() {
         try {
             String endpoint = masBaseUrl.trim() + "/ws/TririgaWS";
-            String soapRequest = "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"http://schemas.xmlsoap.org/soap/envelope/\"\n" +
-"    xmlns:wsse=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd\">\n" +
-"  <SOAP-ENV:Header>\n" +
-"    <wsse:Security SOAP-ENV:mustUnderstand=\"1\">\n" +
-"      <wsse:UsernameToken>\n" +
-"        <wsse:Username>tarun.suneja@ecifm.com</wsse:Username>\n" +
-"        <wsse:Password>TR@maspassword2!</wsse:Password>\n" +
-"      </wsse:UsernameToken>\n" +
-"    </wsse:Security>\n" +
-"  </SOAP-ENV:Header>\n" +
-"  <SOAP-ENV:Body>\n" +
+            String soapRequest = "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n" +
+"  <soap:Body>\n" +
 "    <getApplicationInfo xmlns=\"http://ws.tririga.com\"/>\n" +
-"  </SOAP-ENV:Body>\n" +
-"</SOAP-ENV:Envelope>";
+"  </soap:Body>\n" +
+"</soap:Envelope>";
 
             HttpURLConnection conn = (HttpURLConnection) URI.create(endpoint).toURL().openConnection();
             conn.setRequestMethod("POST");
-            conn.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
-            conn.setRequestProperty("SOAPAction", "");
+            conn.setRequestProperty("Content-Type", "application/soap+xml; charset=utf-8");
             // HTTP Basic Auth
             String auth = "tarun.suneja@ecifm.com:TR@maspassword2!";
             String encoded = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
