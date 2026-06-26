@@ -20,6 +20,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 
 import com.ecifm.saml.bridge.service.MasSyncService;
+import com.ecifm.saml.bridge.service.TririgaWsClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -35,10 +36,12 @@ public class AcsHandlerController {
     private String masContext;
 
     private final MasSyncService masSyncService;
+    private final TririgaWsClient tririgaWsClient;
     private final ObjectMapper objectMapper;
 
-    public AcsHandlerController(MasSyncService masSyncService, ObjectMapper objectMapper) {
+    public AcsHandlerController(MasSyncService masSyncService, TririgaWsClient tririgaWsClient, ObjectMapper objectMapper) {
         this.masSyncService = masSyncService;
+        this.tririgaWsClient = tririgaWsClient;
         this.objectMapper = objectMapper;
     }
 
@@ -52,6 +55,21 @@ public class AcsHandlerController {
     @GetMapping("/test")
     public ResponseEntity<String> test() {
         return ResponseEntity.ok("ecifm-saml-bridge is running");
+    }
+
+    @GetMapping("/test-soap")
+    public ResponseEntity<String> testSoap(
+            @AuthenticationPrincipal OidcUser oidcUser,
+            @RegisteredOAuth2AuthorizedClient("entra-id") OAuth2AuthorizedClient authorizedClient) {
+        if (oidcUser == null || authorizedClient == null) {
+            return ResponseEntity.ok("Not authenticated. Visit /redirect first.");
+        }
+        String email = extractEmail(oidcUser);
+        String accessToken = authorizedClient.getAccessToken().getTokenValue();
+        String result = tririgaWsClient.getApplicationInfo(accessToken);
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_PLAIN)
+                .body("User: " + email + "\n\nSOAP Response:\n" + result);
     }
 
     @GetMapping("/redirect")
