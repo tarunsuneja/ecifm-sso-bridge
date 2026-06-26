@@ -1,9 +1,9 @@
 package com.ecifm.saml.bridge.service;
 
-import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
-import java.util.Base64;
+import java.util.List;
+import java.util.Map;
 
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
@@ -69,23 +69,24 @@ public class TririgaWsClient {
 
         // Attempt 1: No auth + SOAP 1.1
         report.append("=== Attempt 1: No Auth + SOAP 1.1 ===\n");
-        report.append(tryCall(soapUrl, null, SOAP11_ENVELOPE, "text/xml", "urn:getApplicationInfo"));
+        report.append(tryCall(soapUrl, null, null, SOAP11_ENVELOPE, "text/xml", "urn:getApplicationInfo"));
         report.append("\n\n");
 
-        // Attempt 2: Basic Auth + SOAP 1.2 (application/soap+xml)
-        report.append("=== Attempt 2: Basic Auth + SOAP 1.2 ===\n");
-        report.append(tryCall(soapUrl, basicAuthHeader(), null, "application/soap+xml", null));
+        // Attempt 2: TRIRIGA Business Connect custom headers + SOAP 1.2
+        report.append("=== Attempt 2: Username/Password headers + SOAP 1.2 ===\n");
+        report.append(tryCall(soapUrl, tririgaUsername, tririgaPassword, null, "application/soap+xml", null));
         report.append("\n\n");
 
-        // Attempt 3: Basic Auth + SOAP 1.1 (text/xml + SOAPAction)
-        report.append("=== Attempt 3: Basic Auth + SOAP 1.1 ===\n");
-        report.append(tryCall(soapUrl, basicAuthHeader(), SOAP11_ENVELOPE, "text/xml", "urn:getApplicationInfo"));
+        // Attempt 3: TRIRIGA Business Connect custom headers + SOAP 1.1
+        report.append("=== Attempt 3: Username/Password headers + SOAP 1.1 ===\n");
+        report.append(tryCall(soapUrl, tririgaUsername, tririgaPassword, SOAP11_ENVELOPE, "text/xml", "urn:getApplicationInfo"));
         report.append("\n\n");
 
         return report.toString();
     }
 
-    private String tryCall(String url, String authHeader,
+    @SuppressWarnings("unchecked")
+    private String tryCall(String url, String username, String password,
                            String envelope, String contentType, String soapAction) {
         if (envelope == null) {
             envelope = SOAP12_ENVELOPE;
@@ -93,8 +94,9 @@ public class TririgaWsClient {
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.parseMediaType(contentType));
-            if (authHeader != null) {
-                headers.set("Authorization", authHeader);
+            if (username != null && password != null) {
+                headers.put("Username", List.of(username));
+                headers.put("Password", List.of(password));
             }
             if (soapAction != null) {
                 headers.set("SOAPAction", soapAction);
@@ -107,11 +109,6 @@ public class TririgaWsClient {
             log.warn("SOAP failed: {}", e.getMessage());
             return "Failed: " + e.getMessage();
         }
-    }
-
-    private String basicAuthHeader() {
-        String raw = tririgaUsername + ":" + tririgaPassword;
-        return "Basic " + Base64.getEncoder().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
     }
 
     private static void disableSslVerification() {
