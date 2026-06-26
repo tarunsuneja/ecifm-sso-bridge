@@ -1,5 +1,10 @@
 package com.ecifm.saml.bridge.controller;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
@@ -39,6 +44,12 @@ public class AcsHandlerController {
     private final TririgaWsClient tririgaWsClient;
     private final ObjectMapper objectMapper;
 
+    @Value("${tririga.username}")
+    private String tririgaUsername;
+
+    @Value("${tririga.password}")
+    private String tririgaPassword;
+
     public AcsHandlerController(MasSyncService masSyncService, TririgaWsClient tririgaWsClient, ObjectMapper objectMapper) {
         this.masSyncService = masSyncService;
         this.tririgaWsClient = tririgaWsClient;
@@ -77,6 +88,49 @@ public class AcsHandlerController {
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_PLAIN)
                 .body("SOAP Response:\n" + result);
+    }
+
+    @GetMapping("/local/test-raw")
+    public ResponseEntity<String> localTestRaw() {
+        try {
+            String endpoint = masBaseUrl.trim() + "/ws/TririgaWS";
+            String soapRequest = "<soap:Envelope xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\"><soap:Body><getApplicationInfo xmlns=\"http://ws.tririga.com\"/></soap:Body></soap:Envelope>";
+
+            HttpURLConnection conn = (HttpURLConnection) URI.create(endpoint).toURL().openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
+            conn.setRequestProperty("SOAPAction", "");
+            conn.setRequestProperty("Username", tririgaUsername.trim());
+            conn.setRequestProperty("Password", tririgaPassword);
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(30000);
+            conn.setReadTimeout(120000);
+
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(soapRequest.getBytes(StandardCharsets.UTF_8));
+            }
+
+            int responseCode = conn.getResponseCode();
+            StringBuilder responseBody = new StringBuilder();
+            try (BufferedReader br = new BufferedReader(
+                    new InputStreamReader(responseCode >= 400 ? conn.getErrorStream() : conn.getInputStream(),
+                            StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    responseBody.append(line).append("\n");
+                }
+            }
+
+            return ResponseEntity.ok()
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body("HTTP " + responseCode + "\n" + responseBody);
+        } catch (Exception e) {
+            StringWriter sw = new StringWriter();
+            e.printStackTrace(new PrintWriter(sw));
+            return ResponseEntity.ok()
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body("Error: " + e.getMessage() + "\n" + sw);
+        }
     }
 
     @GetMapping("/redirect")
