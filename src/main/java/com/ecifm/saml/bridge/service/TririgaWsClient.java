@@ -62,61 +62,54 @@ public class TririgaWsClient {
 
         StringBuilder report = new StringBuilder();
 
-        // Attempt 1: Bearer token + SOAP 1.2 (application/soap+xml)
-        report.append("=== Attempt 1: Bearer + SOAP 1.2 ===\n");
-        report.append(tryCall(soapUrl, bearerToken, null, "application/soap+xml", null));
+        // Attempt 1: No auth + SOAP 1.1
+        report.append("=== Attempt 1: No Auth + SOAP 1.1 ===\n");
+        report.append(tryCall(soapUrl, null, null, SOAP11_ENVELOPE, "text/xml", "urn:getApplicationInfo"));
         report.append("\n\n");
 
-        // Attempt 2: Bearer token + SOAP 1.1 (text/xml + SOAPAction)
-        report.append("=== Attempt 2: Bearer + SOAP 1.1 ===\n");
-        report.append(tryCall(soapUrl, bearerToken, SOAP11_ENVELOPE, "text/xml", "urn:getApplicationInfo"));
+        // Attempt 2: Bearer token + SOAP 1.2 (application/soap+xml)
+        report.append("=== Attempt 2: Bearer + SOAP 1.2 ===\n");
+        report.append(tryCall(soapUrl, bearerToken, null, null, "application/soap+xml", null));
         report.append("\n\n");
 
-        // Attempt 3: API key + SOAP 1.1
+        // Attempt 3: Bearer token + SOAP 1.1 (text/xml + SOAPAction)
+        report.append("=== Attempt 3: Bearer + SOAP 1.1 ===\n");
+        report.append(tryCall(soapUrl, bearerToken, null, SOAP11_ENVELOPE, "text/xml", "urn:getApplicationInfo"));
+        report.append("\n\n");
+
+        // Attempt 4: API key + SOAP 1.1
         if (apiKey != null && !apiKey.isEmpty()) {
-            report.append("=== Attempt 3: API Key + SOAP 1.1 ===\n");
-            report.append(tryCallWithApiKey(soapUrl, SOAP11_ENVELOPE, "text/xml", "urn:getApplicationInfo"));
+            report.append("=== Attempt 4: API Key + SOAP 1.1 ===\n");
+            report.append(tryCall(soapUrl, null, apiKey, SOAP11_ENVELOPE, "text/xml", "urn:getApplicationInfo"));
             report.append("\n\n");
         }
 
         return report.toString();
     }
 
-    private String tryCall(String url, String token, String envelope, String contentType, String soapAction) {
+    private String tryCall(String url, String bearerToken, String apiKeyValue,
+                           String envelope, String contentType, String soapAction) {
         if (envelope == null) {
             envelope = SOAP12_ENVELOPE;
         }
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.parseMediaType(contentType));
-            headers.setBearerAuth(token);
+            if (bearerToken != null) {
+                headers.setBearerAuth(bearerToken);
+            }
+            if (apiKeyValue != null && !apiKeyValue.isEmpty()) {
+                headers.set("x-api-key", apiKeyValue);
+            }
             if (soapAction != null) {
                 headers.set("SOAPAction", soapAction);
             }
             HttpEntity<String> request = new HttpEntity<>(envelope, headers);
             ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-            log.info("SOAP {} response: {}", contentType, response.getStatusCode());
+            log.info("SOAP response: {}", response.getStatusCode());
             return "Status: " + response.getStatusCode() + "\nBody: " + response.getBody();
         } catch (Exception e) {
-            log.warn("SOAP {} failed: {}", contentType, e.getMessage());
-            return "Failed: " + e.getMessage();
-        }
-    }
-
-    private String tryCallWithApiKey(String url, String envelope, String contentType, String soapAction) {
-        try {
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.parseMediaType(contentType));
-            headers.set("x-api-key", apiKey);
-            if (soapAction != null) {
-                headers.set("SOAPAction", soapAction);
-            }
-            HttpEntity<String> request = new HttpEntity<>(envelope, headers);
-            ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-            log.info("SOAP API key response: {}", response.getStatusCode());
-            return "Status: " + response.getStatusCode() + "\nBody: " + response.getBody();
-        } catch (Exception e) {
-            log.warn("SOAP API key failed: {}", e.getMessage());
+            log.warn("SOAP failed: {}", e.getMessage());
             return "Failed: " + e.getMessage();
         }
     }

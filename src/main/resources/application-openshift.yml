@@ -22,6 +22,9 @@ mas:
   context: ${MAS_CONTEXT:/tririga}
   rest-api: ${MAS_REST_API:/html/en/default/rest/SSOConnect?userName={0}&adGroupName={1}}
 
+mas-core:
+  api-key: ${MAS_CORE_API_KEY:}
+
 entra-id:
   graph:
     enabled: ${GRAPH_API_ENABLED:true}
