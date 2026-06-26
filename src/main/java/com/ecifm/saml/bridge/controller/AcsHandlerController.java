@@ -10,6 +10,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -96,29 +97,60 @@ public class AcsHandlerController {
     public ResponseEntity<String> localTestRaw() {
         try {
             String endpoint = masBaseUrl.trim() + "/ws/TririgaWS";
-            String soapRequest = "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"http://schemas.xmlsoap.org/soap/envelope/\">\n" +
+            String soapBody = "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"http://schemas.xmlsoap.org/soap/envelope/\">\n" +
 "  <SOAP-ENV:Body>\n" +
 "    <getApplicationInfo xmlns=\"http://ws.tririga.com\"/>\n" +
 "  </SOAP-ENV:Body>\n" +
 "</SOAP-ENV:Envelope>";
 
-            HttpURLConnection conn = (HttpURLConnection) URI.create(endpoint).toURL().openConnection();
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
-            conn.setRequestProperty("SOAPAction", "");
-            conn.setDoOutput(true);
-            conn.setConnectTimeout(30000);
-            conn.setReadTimeout(120000);
+            // Step 1: get session cookie
+            HttpURLConnection conn1 = (HttpURLConnection) URI.create(endpoint).toURL().openConnection();
+            conn1.setRequestMethod("POST");
+            conn1.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
+            conn1.setRequestProperty("SOAPAction", "");
+            conn1.setDoOutput(true);
+            conn1.setConnectTimeout(30000);
+            conn1.setReadTimeout(120000);
+            try (OutputStream os = conn1.getOutputStream()) {
+                os.write(soapBody.getBytes(StandardCharsets.UTF_8));
+                os.flush();
+            }
+            String cookies = conn1.getHeaderField("Set-Cookie");
+            int code1 = conn1.getResponseCode();
+            conn1.disconnect();
 
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write(soapRequest.getBytes(StandardCharsets.UTF_8));
+            // Step 2: send with auth and cookie
+            HttpURLConnection conn2 = (HttpURLConnection) URI.create(endpoint).toURL().openConnection();
+            conn2.setRequestMethod("POST");
+            conn2.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
+            conn2.setRequestProperty("SOAPAction", "");
+            conn2.setRequestProperty("Username", tririgaUsername.trim());
+            conn2.setRequestProperty("Password", tririgaPassword);
+            if (cookies != null) {
+                conn2.setRequestProperty("Cookie", cookies);
+            }
+            conn2.setDoOutput(true);
+            conn2.setConnectTimeout(30000);
+            conn2.setReadTimeout(120000);
+            try (OutputStream os = conn2.getOutputStream()) {
+                os.write(soapBody.getBytes(StandardCharsets.UTF_8));
                 os.flush();
             }
 
-            int responseCode = conn.getResponseCode();
+            int responseCode = conn2.getResponseCode();
+            Map<String, List<String>> respHeaders = conn2.getHeaderFields();
             StringBuilder responseBody = new StringBuilder();
+            responseBody.append("Step1: HTTP ").append(code1).append(", Cookie: ").append(cookies).append("\n\n");
+            responseBody.append("Step2: HTTP ").append(responseCode).append("\n");
+            responseBody.append("Response Headers:\n");
+            for (Map.Entry<String, List<String>> h : respHeaders.entrySet()) {
+                if (h.getKey() != null) {
+                    responseBody.append("  ").append(h.getKey()).append(": ").append(String.join(", ", h.getValue())).append("\n");
+                }
+            }
+            responseBody.append("\nBody:\n");
             try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(responseCode >= 400 ? conn.getErrorStream() : conn.getInputStream(),
+                    new InputStreamReader(responseCode >= 400 ? conn2.getErrorStream() : conn2.getInputStream(),
                             StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = br.readLine()) != null) {
@@ -128,7 +160,7 @@ public class AcsHandlerController {
 
             return ResponseEntity.ok()
                     .contentType(MediaType.TEXT_PLAIN)
-                    .body("HTTP " + responseCode + "\n" + responseBody);
+                    .body(responseBody.toString());
         } catch (Exception e) {
             StringWriter sw = new StringWriter();
             e.printStackTrace(new PrintWriter(sw));
