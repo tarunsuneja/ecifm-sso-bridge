@@ -93,6 +93,67 @@ public class AcsHandlerController {
                 .body("SOAP Response:\n" + result);
     }
 
+    @GetMapping("/local/test-internal")
+    public ResponseEntity<String> localTestInternal() {
+        try {
+            // Try internal service DNS instead of external route
+            String[] endpoints = {
+                "https://inst1-main-appserver-0.mas-inst1-facilities.svc:443/ws/TririgaWS",
+                "https://inst1-main-appserver-0.mas-inst1-facilities.svc.cluster.local:443/ws/TririgaWS",
+                "https://inst1-main-appserver-0.mas-inst1-facilities.svc:9443/ws/TririgaWS"
+            };
+            String soapBody = "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"http://schemas.xmlsoap.org/soap/envelope/\">\n" +
+"  <SOAP-ENV:Body>\n" +
+"    <getApplicationInfo xmlns=\"http://ws.tririga.com\"/>\n" +
+"  </SOAP-ENV:Body>\n" +
+"</SOAP-ENV:Envelope>";
+            StringBuilder result = new StringBuilder();
+            for (String endpoint : endpoints) {
+                result.append("=== Trying: ").append(endpoint).append(" ===\n");
+                try {
+                    HttpURLConnection conn = (HttpURLConnection) URI.create(endpoint).toURL().openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
+                    conn.setRequestProperty("SOAPAction", "");
+                    conn.setDoOutput(true);
+                    conn.setConnectTimeout(5000);
+                    conn.setReadTimeout(10000);
+                    try (OutputStream os = conn.getOutputStream()) {
+                        os.write(soapBody.getBytes(StandardCharsets.UTF_8));
+                        os.flush();
+                    }
+                    int code = conn.getResponseCode();
+                    StringBuilder body = new StringBuilder();
+                    try (BufferedReader br = new BufferedReader(
+                            new InputStreamReader(code >= 400 ? conn.getErrorStream() : conn.getInputStream(),
+                                    StandardCharsets.UTF_8))) {
+                        String line;
+                        while ((line = br.readLine()) != null) {
+                            body.append(line).append("\n");
+                        }
+                    }
+                    result.append("HTTP ").append(code).append("\n");
+                    String cookie = conn.getHeaderField("Set-Cookie");
+                    if (cookie != null) {
+                        result.append("Cookie: ").append(cookie).append("\n");
+                    }
+                    result.append(body).append("\n\n");
+                } catch (Exception e) {
+                    result.append("Error: ").append(e.getMessage()).append("\n\n");
+                }
+            }
+            return ResponseEntity.ok()
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body(result.toString());
+        } catch (Exception e) {
+            StringWriter sw = new StringWriter();
+            e.printStackTrace(new PrintWriter(sw));
+            return ResponseEntity.ok()
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body("Error: " + e.getMessage() + "\n" + sw);
+        }
+    }
+
     @GetMapping("/local/test-raw")
     public ResponseEntity<String> localTestRaw() {
         try {
