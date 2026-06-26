@@ -109,6 +109,9 @@ public class AcsHandlerController {
             conn1.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
             conn1.setRequestProperty("SOAPAction", "");
             conn1.setDoOutput(true);
+            conn1.setDoInput(true);
+            conn1.setUseCaches(false);
+            conn1.setInstanceFollowRedirects(false);
             conn1.setConnectTimeout(30000);
             conn1.setReadTimeout(120000);
             try (OutputStream os = conn1.getOutputStream()) {
@@ -119,17 +122,21 @@ public class AcsHandlerController {
             int code1 = conn1.getResponseCode();
             conn1.disconnect();
 
-            // Step 2: send with auth and cookie
+            // Step 2: send with HTTP Basic Auth + cookie
+            String auth = tririgaUsername.trim() + ":" + tririgaPassword;
+            String encoded = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
             HttpURLConnection conn2 = (HttpURLConnection) URI.create(endpoint).toURL().openConnection();
             conn2.setRequestMethod("POST");
             conn2.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
             conn2.setRequestProperty("SOAPAction", "");
-            conn2.setRequestProperty("Username", tririgaUsername.trim());
-            conn2.setRequestProperty("Password", tririgaPassword);
+            conn2.setRequestProperty("Authorization", "Basic " + encoded);
             if (cookies != null) {
                 conn2.setRequestProperty("Cookie", cookies);
             }
             conn2.setDoOutput(true);
+            conn2.setDoInput(true);
+            conn2.setUseCaches(false);
+            conn2.setInstanceFollowRedirects(false);
             conn2.setConnectTimeout(30000);
             conn2.setReadTimeout(120000);
             try (OutputStream os = conn2.getOutputStream()) {
