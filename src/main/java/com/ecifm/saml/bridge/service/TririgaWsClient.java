@@ -1,5 +1,7 @@
 package com.ecifm.saml.bridge.service;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.net.URL;
 import java.util.List;
 import java.util.Map;
@@ -50,7 +52,9 @@ public class TririgaWsClient {
                     + "  dbBuildNumber: " + value(info.getDbBuildNumber()) + "\n"
                     + "  tririgaBuildNumber: " + value(info.getTririgaBuildNumber());
         } catch (Exception e) {
-            log.warn("getApplicationInfo failed: {}", e.getMessage());
+            StringWriter sw = new StringWriter();
+            e.printStackTrace(new PrintWriter(sw));
+            log.warn("getApplicationInfo failed: {}\n{}", e.getMessage(), sw);
             return "Failed: " + e.getMessage();
         }
     }
@@ -70,7 +74,8 @@ public class TririgaWsClient {
 
     @SuppressWarnings("unchecked")
     private TririgaWSPortType createPort() throws Exception {
-        String endpoint = masBaseUrl + masContext + "/ws/TririgaWS";
+        String ctx = masContext == null ? "" : masContext.replaceAll("^/+|/+$", "");
+        String endpoint = ctx.isEmpty() ? masBaseUrl + "/ws/TririgaWS" : masBaseUrl + "/" + ctx + "/ws/TririgaWS";
         log.info("Creating CXF client for endpoint: {}", endpoint);
 
         URL wsdlUrl = getClass().getResource(WSDL_RESOURCE);
