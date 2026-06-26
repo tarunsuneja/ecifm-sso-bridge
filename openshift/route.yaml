@@ -2,10 +2,11 @@ apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
   name: ecifm-sso-bridge
-  annotations:
-    haproxy.router.openshift.io/rewrite-target: /
+  labels:
+    app: ecifm-sso-bridge
 spec:
-  host: bridge.apps.ocp.example.com
+  host: main.facilities.inst1.apps.npos2.ecifmdev.net
+  path: /tririga
   to:
     kind: Service
     name: ecifm-sso-bridge

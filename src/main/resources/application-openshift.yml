@@ -1,3 +1,8 @@
+server:
+  servlet:
+    context-path: /tririga
+  forward-headers-strategy: framework
+
 spring:
   security:
     oauth2:
@@ -15,8 +20,7 @@ spring:
             user-name-attribute: sub
 mas:
   base-url: ${MAS_BASE_URL}
-  context: ${MAS_CONTEXT:/tririga}
-  rest-api: ${MAS_REST_API:/html/en/default/rest/SSOConnect?userName={0}&adGroupName={1}}
+  context: ${MAS_CONTEXT:}
 
 tririga:
   username: ${TRIRIGA_USERNAME}
