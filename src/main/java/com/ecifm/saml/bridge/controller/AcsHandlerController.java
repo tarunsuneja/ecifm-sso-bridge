@@ -97,12 +97,14 @@ public class AcsHandlerController {
         try {
             String endpoint = masBaseUrl.trim() + "/ws/TririgaWS";
             String soapRequest = "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"http://schemas.xmlsoap.org/soap/envelope/\"\n" +
-"    xmlns:h=\"http://soap-authentication.org/basic/2001/10/\">\n" +
+"    xmlns:wsse=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd\">\n" +
 "  <SOAP-ENV:Header>\n" +
-"    <h:BasicChallenge>\n" +
-"      <Username>tarun.suneja@ecifm.com</Username>\n" +
-"      <Password>TR@maspassword2!</Password>\n" +
-"    </h:BasicChallenge>\n" +
+"    <wsse:Security SOAP-ENV:mustUnderstand=\"1\">\n" +
+"      <wsse:UsernameToken>\n" +
+"        <wsse:Username>tarun.suneja@ecifm.com</wsse:Username>\n" +
+"        <wsse:Password>TR@maspassword2!</wsse:Password>\n" +
+"      </wsse:UsernameToken>\n" +
+"    </wsse:Security>\n" +
 "  </SOAP-ENV:Header>\n" +
 "  <SOAP-ENV:Body>\n" +
 "    <getApplicationInfo xmlns=\"http://ws.tririga.com\"/>\n" +
