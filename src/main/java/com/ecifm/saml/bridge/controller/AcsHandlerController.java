@@ -96,52 +96,112 @@ public class AcsHandlerController {
     @GetMapping("/local/test-internal")
     public ResponseEntity<String> localTestInternal() {
         try {
-            // Try internal service DNS instead of external route
-            String[] endpoints = {
-                "https://inst1-main-appserver-0.mas-inst1-facilities.svc:443/ws/TririgaWS",
-                "https://inst1-main-appserver-0.mas-inst1-facilities.svc.cluster.local:443/ws/TririgaWS",
-                "https://inst1-main-appserver-0.mas-inst1-facilities.svc:9443/ws/TririgaWS"
-            };
+            String endpoint = "https://inst1-main-appserver-0.mas-inst1-facilities.svc:443/ws/TririgaWS";
             String soapBody = "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"http://schemas.xmlsoap.org/soap/envelope/\">\n" +
 "  <SOAP-ENV:Body>\n" +
 "    <getApplicationInfo xmlns=\"http://ws.tririga.com\"/>\n" +
 "  </SOAP-ENV:Body>\n" +
 "</SOAP-ENV:Envelope>";
             StringBuilder result = new StringBuilder();
-            for (String endpoint : endpoints) {
-                result.append("=== Trying: ").append(endpoint).append(" ===\n");
-                try {
-                    HttpURLConnection conn = (HttpURLConnection) URI.create(endpoint).toURL().openConnection();
-                    conn.setRequestMethod("POST");
-                    conn.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
-                    conn.setRequestProperty("SOAPAction", "");
-                    conn.setDoOutput(true);
-                    conn.setConnectTimeout(5000);
-                    conn.setReadTimeout(10000);
-                    try (OutputStream os = conn.getOutputStream()) {
-                        os.write(soapBody.getBytes(StandardCharsets.UTF_8));
-                        os.flush();
-                    }
-                    int code = conn.getResponseCode();
-                    StringBuilder body = new StringBuilder();
-                    try (BufferedReader br = new BufferedReader(
-                            new InputStreamReader(code >= 400 ? conn.getErrorStream() : conn.getInputStream(),
-                                    StandardCharsets.UTF_8))) {
-                        String line;
-                        while ((line = br.readLine()) != null) {
-                            body.append(line).append("\n");
-                        }
-                    }
-                    result.append("HTTP ").append(code).append("\n");
-                    String cookie = conn.getHeaderField("Set-Cookie");
-                    if (cookie != null) {
-                        result.append("Cookie: ").append(cookie).append("\n");
-                    }
-                    result.append(body).append("\n\n");
-                } catch (Exception e) {
-                    result.append("Error: ").append(e.getMessage()).append("\n\n");
+
+            // Test 1: No auth
+            result.append("=== Test 1: No auth ===\n");
+            try {
+                HttpURLConnection conn = (HttpURLConnection) URI.create(endpoint).toURL().openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
+                conn.setRequestProperty("SOAPAction", "");
+                conn.setDoOutput(true);
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(10000);
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(soapBody.getBytes(StandardCharsets.UTF_8));
+                    os.flush();
                 }
+                int code = conn.getResponseCode();
+                result.append("HTTP ").append(code).append("\n");
+                String cookie = conn.getHeaderField("Set-Cookie");
+                if (cookie != null) result.append("Cookie: ").append(cookie).append("\n");
+                StringBuilder body = new StringBuilder();
+                try (BufferedReader br = new BufferedReader(
+                        new InputStreamReader(code >= 400 ? conn.getErrorStream() : conn.getInputStream(),
+                                StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = br.readLine()) != null) body.append(line).append("\n");
+                }
+                result.append(body).append("\n");
+            } catch (Exception e) {
+                result.append("Error: ").append(e.getMessage()).append("\n");
             }
+
+            // Test 2: Custom Username/Password headers
+            result.append("=== Test 2: Custom Username/Password headers ===\n");
+            try {
+                HttpURLConnection conn = (HttpURLConnection) URI.create(endpoint).toURL().openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
+                conn.setRequestProperty("SOAPAction", "");
+                conn.setRequestProperty("Username", tririgaUsername.trim());
+                conn.setRequestProperty("Password", tririgaPassword);
+                conn.setDoOutput(true);
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(10000);
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(soapBody.getBytes(StandardCharsets.UTF_8));
+                    os.flush();
+                }
+                int code = conn.getResponseCode();
+                result.append("HTTP ").append(code).append("\n");
+                String cookie = conn.getHeaderField("Set-Cookie");
+                if (cookie != null) result.append("Cookie: ").append(cookie).append("\n");
+                StringBuilder body = new StringBuilder();
+                try (BufferedReader br = new BufferedReader(
+                        new InputStreamReader(code >= 400 ? conn.getErrorStream() : conn.getInputStream(),
+                                StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = br.readLine()) != null) body.append(line).append("\n");
+                }
+                result.append(body).append("\n");
+            } catch (Exception e) {
+                result.append("Error: ").append(e.getMessage()).append("\n");
+            }
+
+            // Test 3: HTTP Basic Auth
+            result.append("=== Test 3: HTTP Basic Auth ===\n");
+            try {
+                String auth = tririgaUsername.trim() + ":" + tririgaPassword;
+                String encoded = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+                HttpURLConnection conn = (HttpURLConnection) URI.create(endpoint).toURL().openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "text/xml; charset=utf-8");
+                conn.setRequestProperty("SOAPAction", "");
+                conn.setRequestProperty("Authorization", "Basic " + encoded);
+                conn.setDoOutput(true);
+                conn.setDoInput(true);
+                conn.setUseCaches(false);
+                conn.setInstanceFollowRedirects(false);
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(10000);
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(soapBody.getBytes(StandardCharsets.UTF_8));
+                    os.flush();
+                }
+                int code = conn.getResponseCode();
+                result.append("HTTP ").append(code).append("\n");
+                String cookie = conn.getHeaderField("Set-Cookie");
+                if (cookie != null) result.append("Cookie: ").append(cookie).append("\n");
+                StringBuilder body = new StringBuilder();
+                try (BufferedReader br = new BufferedReader(
+                        new InputStreamReader(code >= 400 ? conn.getErrorStream() : conn.getInputStream(),
+                                StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = br.readLine()) != null) body.append(line).append("\n");
+                }
+                result.append(body).append("\n");
+            } catch (Exception e) {
+                result.append("Error: ").append(e.getMessage()).append("\n");
+            }
+
             return ResponseEntity.ok()
                     .contentType(MediaType.TEXT_PLAIN)
                     .body(result.toString());
