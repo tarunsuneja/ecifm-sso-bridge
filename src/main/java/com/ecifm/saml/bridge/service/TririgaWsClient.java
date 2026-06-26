@@ -5,11 +5,14 @@ import java.io.StringWriter;
 import java.net.URL;
 import java.security.cert.X509Certificate;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
+
+import jakarta.xml.ws.handler.MessageContext;
 
 import org.apache.cxf.configuration.jsse.TLSClientParameters;
 import org.apache.cxf.endpoint.Client;
@@ -91,6 +94,12 @@ public class TririgaWsClient {
         BindingProvider bp = (BindingProvider) port;
         bp.getRequestContext().put(BindingProvider.ENDPOINT_ADDRESS_PROPERTY, endpoint);
         bp.getRequestContext().put(BindingProvider.SESSION_MAINTAIN_PROPERTY, Boolean.TRUE);
+
+        Map<String, List<String>> headers = (Map<String, List<String>>)
+                bp.getRequestContext().computeIfAbsent(MessageContext.HTTP_REQUEST_HEADERS,
+                        k -> new LinkedHashMap<String, List<String>>());
+        headers.put("Username", List.of(tririgaUsername.trim()));
+        headers.put("Password", List.of(tririgaPassword));
 
         Client client = ClientProxy.getClient(port);
         HTTPConduit conduit = (HTTPConduit) client.getConduit();
