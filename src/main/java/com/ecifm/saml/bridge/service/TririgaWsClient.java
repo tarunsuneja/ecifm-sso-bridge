@@ -92,13 +92,6 @@ public class TririgaWsClient {
         bp.getRequestContext().put(BindingProvider.ENDPOINT_ADDRESS_PROPERTY, endpoint);
         bp.getRequestContext().put(BindingProvider.SESSION_MAINTAIN_PROPERTY, Boolean.TRUE);
 
-        String basicAuth = Base64.getEncoder().encodeToString(
-                (tririgaUsername.trim() + ":" + tririgaPassword).getBytes());
-        Map<String, List<String>> headers = (Map<String, List<String>>)
-                bp.getRequestContext().computeIfAbsent(MessageContext.HTTP_REQUEST_HEADERS,
-                        k -> new java.util.LinkedHashMap<String, List<String>>());
-        headers.put("Authorization", List.of("Basic " + basicAuth));
-
         Client client = ClientProxy.getClient(port);
         HTTPConduit conduit = (HTTPConduit) client.getConduit();
 
@@ -107,6 +100,11 @@ public class TririgaWsClient {
         policy.setReceiveTimeout(120_000);
         policy.setAllowChunking(false);
         conduit.setClient(policy);
+        org.apache.cxf.configuration.security.AuthorizationPolicy auth =
+                new org.apache.cxf.configuration.security.AuthorizationPolicy();
+        auth.setUserName(tririgaUsername.trim());
+        auth.setPassword(tririgaPassword);
+        conduit.setAuthorization(auth);
 
         TLSClientParameters tls = new TLSClientParameters();
         tls.setDisableCNCheck(true);
