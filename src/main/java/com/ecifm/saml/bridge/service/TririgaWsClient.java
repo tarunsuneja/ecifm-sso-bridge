@@ -1,46 +1,32 @@
 package com.ecifm.saml.bridge.service;
 
-import java.security.SecureRandom;
-import java.security.cert.X509Certificate;
+import java.net.URL;
 import java.util.List;
 import java.util.Map;
 
-import javax.net.ssl.HttpsURLConnection;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
-
+import org.apache.cxf.configuration.jsse.TLSClientParameters;
+import org.apache.cxf.endpoint.Client;
+import org.apache.cxf.frontend.ClientProxy;
+import org.apache.cxf.transport.http.HTTPConduit;
+import org.apache.cxf.transports.http.configuration.HTTPClientPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.web.client.RestTemplateBuilder;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestTemplate;
+
+import com.ecifm.saml.bridge.tririga.generated.dto.ApplicationInfo;
+import com.ecifm.saml.bridge.tririga.generated.ws.TririgaWS;
+import com.ecifm.saml.bridge.tririga.generated.ws.TririgaWSPortType;
+
+import jakarta.xml.ws.BindingProvider;
+import jakarta.xml.ws.handler.MessageContext;
 
 @Component
 public class TririgaWsClient {
 
     private static final Logger log = LoggerFactory.getLogger(TririgaWsClient.class);
 
-    private static final String SOAP12_ENVELOPE =
-            "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" xmlns:ws=\"http://ws.tririga.com\">"
-          + "  <soap:Header/>"
-          + "  <soap:Body>"
-          + "    <ws:getApplicationInfo/>"
-          + "  </soap:Body>"
-          + "</soap:Envelope>";
-
-    private static final String SOAP11_ENVELOPE =
-            "<soap:Envelope xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:ws=\"http://ws.tririga.com\">"
-          + "  <soap:Header/>"
-          + "  <soap:Body>"
-          + "    <ws:getApplicationInfo/>"
-          + "  </soap:Body>"
-          + "</soap:Envelope>";
+    private static final String WSDL_RESOURCE = "/wsdl/TririgaWS.wsdl";
 
     @Value("${mas.base-url}")
     private String masBaseUrl;
@@ -54,79 +40,71 @@ public class TririgaWsClient {
     @Value("${tririga.password}")
     private String tririgaPassword;
 
-    private final RestTemplate restTemplate;
-
-    public TririgaWsClient(RestTemplateBuilder restTemplateBuilder) {
-        this.restTemplate = restTemplateBuilder.build();
-        disableSslVerification();
-    }
-
     public String getApplicationInfo() {
-        String soapUrl = masBaseUrl + masContext + "/ws/TririgaWS";
-        log.info("TririgaWS SOAP URL: {}", soapUrl);
-
-        StringBuilder report = new StringBuilder();
-
-        // Attempt 1: No auth + SOAP 1.1
-        report.append("=== Attempt 1: No Auth + SOAP 1.1 ===\n");
-        report.append(tryCall(soapUrl, null, null, SOAP11_ENVELOPE, "text/xml", "urn:getApplicationInfo"));
-        report.append("\n\n");
-
-        // Attempt 2: TRIRIGA Business Connect custom headers + SOAP 1.2
-        report.append("=== Attempt 2: Username/Password headers + SOAP 1.2 ===\n");
-        report.append(tryCall(soapUrl, tririgaUsername, tririgaPassword, null, "application/soap+xml", null));
-        report.append("\n\n");
-
-        // Attempt 3: TRIRIGA Business Connect custom headers + SOAP 1.1
-        report.append("=== Attempt 3: Username/Password headers + SOAP 1.1 ===\n");
-        report.append(tryCall(soapUrl, tririgaUsername, tririgaPassword, SOAP11_ENVELOPE, "text/xml", "urn:getApplicationInfo"));
-        report.append("\n\n");
-
-        return report.toString();
-    }
-
-    @SuppressWarnings("unchecked")
-    private String tryCall(String url, String username, String password,
-                           String envelope, String contentType, String soapAction) {
-        if (envelope == null) {
-            envelope = SOAP12_ENVELOPE;
-        }
         try {
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.parseMediaType(contentType));
-            if (username != null && password != null) {
-                headers.put("Username", List.of(username));
-                headers.put("Password", List.of(password));
-            }
-            if (soapAction != null) {
-                headers.set("SOAPAction", soapAction);
-            }
-            HttpEntity<String> request = new HttpEntity<>(envelope, headers);
-            ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-            log.info("SOAP response: {}", response.getStatusCode());
-            return "Status: " + response.getStatusCode() + "\nBody: " + response.getBody();
+            TririgaWSPortType port = createPort();
+            ApplicationInfo info = port.getApplicationInfo();
+            log.info("getApplicationInfo succeeded: version={}", info.getApiVersion());
+            return "Success:\n"
+                    + "  apiVersion: " + value(info.getApiVersion()) + "\n"
+                    + "  dbBuildNumber: " + value(info.getDbBuildNumber()) + "\n"
+                    + "  tririgaBuildNumber: " + value(info.getTririgaBuildNumber());
         } catch (Exception e) {
-            log.warn("SOAP failed: {}", e.getMessage());
+            log.warn("getApplicationInfo failed: {}", e.getMessage());
             return "Failed: " + e.getMessage();
         }
     }
 
-    private static void disableSslVerification() {
+    public String getHttpSession() {
         try {
-            TrustManager[] trustAll = new TrustManager[]{
-                new X509TrustManager() {
-                    public void checkClientTrusted(X509Certificate[] chain, String authType) {}
-                    public void checkServerTrusted(X509Certificate[] chain, String authType) {}
-                    public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
-                }
-            };
-            SSLContext sc = SSLContext.getInstance("TLS");
-            sc.init(null, trustAll, new SecureRandom());
-            HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
-            HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
-            log.warn("SSL verification disabled for TririgaWS SOAP calls");
+            TririgaWSPortType port = createPort();
+            var session = port.getHttpSession();
+            log.info("getHttpSession succeeded");
+            return "Success:\n"
+                    + "  Session ID: " + session.getId();
         } catch (Exception e) {
-            throw new RuntimeException("Failed to disable SSL verification", e);
+            log.warn("getHttpSession failed: {}", e.getMessage());
+            return "Failed: " + e.getMessage();
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private TririgaWSPortType createPort() throws Exception {
+        String endpoint = masBaseUrl + masContext + "/ws/TririgaWS";
+        log.info("Creating CXF client for endpoint: {}", endpoint);
+
+        URL wsdlUrl = getClass().getResource(WSDL_RESOURCE);
+        TririgaWS service = new TririgaWS(wsdlUrl);
+        TririgaWSPortType port = service.getTririgaWSPort();
+
+        BindingProvider bp = (BindingProvider) port;
+        bp.getRequestContext().put(BindingProvider.ENDPOINT_ADDRESS_PROPERTY, endpoint);
+        bp.getRequestContext().put(BindingProvider.SESSION_MAINTAIN_PROPERTY, Boolean.TRUE);
+
+        Map<String, List<String>> headers = (Map<String, List<String>>)
+                bp.getRequestContext().computeIfAbsent(MessageContext.HTTP_REQUEST_HEADERS,
+                        k -> new java.util.LinkedHashMap<String, List<String>>());
+        headers.put("Username", List.of(tririgaUsername.trim()));
+        headers.put("Password", List.of(tririgaPassword));
+
+        Client client = ClientProxy.getClient(port);
+        HTTPConduit conduit = (HTTPConduit) client.getConduit();
+
+        HTTPClientPolicy policy = new HTTPClientPolicy();
+        policy.setConnectionTimeout(30_000);
+        policy.setReceiveTimeout(120_000);
+        policy.setAllowChunking(false);
+        conduit.setClient(policy);
+
+        TLSClientParameters tls = new TLSClientParameters();
+        tls.setDisableCNCheck(true);
+        conduit.setTlsClientParameters(tls);
+
+        log.info("CXF client configured with Username/Password for user '{}'", tririgaUsername);
+        return port;
+    }
+
+    private static String value(jakarta.xml.bind.JAXBElement<String> element) {
+        return element == null ? "" : element.getValue();
     }
 }

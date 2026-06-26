@@ -20,6 +20,7 @@
 
     <properties>
         <java.version>17</java.version>
+        <cxf.version>4.0.5</cxf.version>
     </properties>
 
     <dependencies>
@@ -53,6 +54,18 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <dependency>
+            <groupId>org.apache.cxf</groupId>
+            <artifactId>cxf-rt-frontend-jaxws</artifactId>
+            <version>${cxf.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.cxf</groupId>
+            <artifactId>cxf-rt-transports-http</artifactId>
+            <version>${cxf.version}</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -61,6 +74,44 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.cxf</groupId>
+                <artifactId>cxf-codegen-plugin</artifactId>
+                <version>${cxf.version}</version>
+                <executions>
+                    <execution>
+                        <id>generate-tririga-wsdl-client</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>wsdl2java</goal>
+                        </goals>
+                        <configuration>
+                            <sourceRoot>${project.build.directory}/generated-sources/cxf</sourceRoot>
+                            <wsdlOptions>
+                                <wsdlOption>
+                                    <wsdl>${project.basedir}/src/main/resources/wsdl/TririgaWS.wsdl</wsdl>
+                                    <extraargs>
+                                        <extraarg>-p</extraarg>
+                                        <extraarg>http://ws.tririga.com=com.ecifm.saml.bridge.tririga.generated.ws</extraarg>
+                                        <extraarg>-p</extraarg>
+                                        <extraarg>http://dto.ws.tririga.com=com.ecifm.saml.bridge.tririga.generated.dto</extraarg>
+                                        <extraarg>-p</extraarg>
+                                        <extraarg>http://gui.dto.ws.tririga.com=com.ecifm.saml.bridge.tririga.generated.gui</extraarg>
+                                        <extraarg>-p</extraarg>
+                                        <extraarg>http://content.dto.ws.tririga.com=com.ecifm.saml.bridge.tririga.generated.content</extraarg>
+                                        <extraarg>-p</extraarg>
+                                        <extraarg>http://errors.ws.tririga.com=com.ecifm.saml.bridge.tririga.generated.errors</extraarg>
+                                        <extraarg>-p</extraarg>
+                                        <extraarg>http://lang.java=com.ecifm.saml.bridge.tririga.generated.lang</extraarg>
+                                        <extraarg>-autoNameResolution</extraarg>
+                                        <extraarg>-client</extraarg>
+                                    </extraargs>
+                                </wsdlOption>
+                            </wsdlOptions>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>
