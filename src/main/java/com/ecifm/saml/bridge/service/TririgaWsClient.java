@@ -4,6 +4,7 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.net.URL;
 import java.security.cert.X509Certificate;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -90,11 +91,12 @@ public class TririgaWsClient {
         bp.getRequestContext().put(BindingProvider.ENDPOINT_ADDRESS_PROPERTY, endpoint);
         bp.getRequestContext().put(BindingProvider.SESSION_MAINTAIN_PROPERTY, Boolean.TRUE);
 
+        String basicAuth = Base64.getEncoder().encodeToString(
+                (tririgaUsername.trim() + ":" + tririgaPassword).getBytes());
         Map<String, List<String>> headers = (Map<String, List<String>>)
                 bp.getRequestContext().computeIfAbsent(MessageContext.HTTP_REQUEST_HEADERS,
                         k -> new java.util.LinkedHashMap<String, List<String>>());
-        headers.put("Username", List.of(tririgaUsername.trim()));
-        headers.put("Password", List.of(tririgaPassword));
+        headers.put("Authorization", List.of("Basic " + basicAuth));
 
         Client client = ClientProxy.getClient(port);
         HTTPConduit conduit = (HTTPConduit) client.getConduit();
