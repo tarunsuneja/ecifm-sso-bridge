@@ -314,57 +314,11 @@ public class AcsHandlerController {
         }
 
         String email = extractEmail(oidcUser);
-        log.info("Authenticated user: {}, initiating MAS OIDC flow", email);
-
-        String redirectUrl = getLibertyOidcRedirect();
-        if (redirectUrl == null) {
-            return ResponseEntity.status(HttpStatus.FOUND)
-                    .header(HttpHeaders.LOCATION, masRedirectUrl)
-                    .build();
-        }
+        log.info("Authenticated user: {}, redirecting to MAS: {}", email, masRedirectUrl);
 
         return ResponseEntity.status(HttpStatus.FOUND)
-                .header(HttpHeaders.LOCATION, redirectUrl)
+                .header(HttpHeaders.LOCATION, masRedirectUrl)
                 .build();
-    }
-
-    private String getLibertyOidcRedirect() {
-        try {
-            URL url = URI.create("https://auth.inst1.apps.npos2.ecifmdev.net/api/auth/oidclogin?oidcid=default-oidc").toURL();
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(5000);
-            conn.setReadTimeout(5000);
-
-            int responseCode = conn.getResponseCode();
-            if (responseCode != 200) {
-                log.warn("Liberty OIDC login API returned {}", responseCode);
-                return null;
-            }
-
-            StringBuilder body = new StringBuilder();
-            try (BufferedReader br = new BufferedReader(
-                    new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = br.readLine()) != null) {
-                    body.append(line);
-                }
-            }
-
-            JsonNode json = objectMapper.readTree(body.toString());
-            String path = json.has("redirect") ? json.get("redirect").asText() : null;
-            if (path == null || path.isBlank()) {
-                log.warn("No redirect URL in Liberty OIDC login response");
-                return null;
-            }
-
-            String fullUrl = "https://auth.inst1.apps.npos2.ecifmdev.net" + path;
-            log.info("Liberty OIDC redirect URL: {}", fullUrl);
-            return fullUrl;
-        } catch (Exception e) {
-            log.error("Failed to get Liberty OIDC redirect: {}", e.getMessage());
-            return null;
-        }
     }
 
     private ResponseEntity<String> buildPage(String email, String accessToken,
