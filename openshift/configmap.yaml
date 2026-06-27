@@ -10,5 +10,5 @@ data:
   JWT_ISSUER_URI: "https://login.microsoftonline.com/c99cc570-ba4f-474e-897d-22255a3cecd7/v2.0"
   GRAPH_API_ENABLED: "true"
   SPRING_PROFILES_ACTIVE: "openshift"
-  AZURE_CLIENT_ID: "31f536f1-10ee-4157-8a55-69d207b07e32"
+  AZURE_CLIENT_ID: "cbcea157-2c35-4ce3-b86c-782282e00857"
   TRIRIGA_USERNAME: "tarun.suneja@ecifm.com"
