@@ -65,7 +65,7 @@ public class AcsHandlerController {
     @GetMapping("/")
     public ResponseEntity<String> defaultLanding() {
         return ResponseEntity.status(HttpStatus.FOUND)
-                .header(HttpHeaders.LOCATION, "/redirect")
+                .header(HttpHeaders.LOCATION, masRedirectUrl)
                 .build();
     }
 
@@ -306,38 +306,17 @@ public class AcsHandlerController {
             @AuthenticationPrincipal OidcUser oidcUser,
             @RegisteredOAuth2AuthorizedClient("entra-id") OAuth2AuthorizedClient authorizedClient) {
 
-        String tririgaUrl = masRedirectUrl;
-
         if (oidcUser == null || authorizedClient == null) {
-            return buildPage("Not Logged In", "",
-                    List.of(), null, tririgaUrl,
-                    "warning", "You are not authenticated. Please log in first.");
+            return ResponseEntity.status(HttpStatus.FOUND)
+                    .header(HttpHeaders.LOCATION, "/oauth2/authorization/entra-id")
+                    .build();
         }
 
-        String email = extractEmail(oidcUser);
-        String accessToken = authorizedClient.getAccessToken().getTokenValue();
-        List<String> groups = extractGroupsFromAccessToken(accessToken);
+        log.info("Authenticated user: {}, redirecting to: {}", extractEmail(oidcUser), masRedirectUrl);
 
-        if (groups.isEmpty()) {
-            log.info("No groups in access token, will use Graph API fallback in sync");
-        }
-
-        log.info("SSO redirect for user: {}, groups: {}", email, groups);
-
-        boolean syncSucceeded = false;
-        String syncMessage = "";
-        try {
-            syncSucceeded = masSyncService.syncUser(accessToken, email, groups);
-            syncMessage = syncSucceeded ? "Groups synced successfully to TRIRIGA."
-                    : "SSOConnect API returned an error. TRIRIGA SSO app may not be configured yet.";
-            log.info("SSOConnect sync result: {} - {}", syncSucceeded, syncMessage);
-        } catch (Exception e) {
-            log.error("SSOConnect sync failed with exception: {}", e.getMessage(), e);
-            syncMessage = "SSOConnect sync failed: " + e.getMessage();
-        }
-
-        return buildPage(email, accessToken, groups, syncSucceeded, tririgaUrl,
-                syncSucceeded ? "success" : "error", syncMessage);
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .header(HttpHeaders.LOCATION, masRedirectUrl)
+                .build();
     }
 
     private ResponseEntity<String> buildPage(String email, String accessToken,
