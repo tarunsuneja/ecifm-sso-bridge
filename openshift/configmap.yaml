@@ -5,7 +5,7 @@ metadata:
 data:
   MAS_BASE_URL: "https://main.facilities.inst1.apps.npos2.ecifmdev.net"
   MAS_CONTEXT: "/tririga"
-  MAS_REDIRECT_URL: "https://auth.inst1.apps.npos2.ecifmdev.net/oidc/endpoint/MaximoAppSuite/authorize?client_id=facilities&response_type=code&redirect_uri=https://main.facilities.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/facilities&scope=openid%20email%20profile"
+  MAS_REDIRECT_URL: "https://main.facilities.inst1.apps.npos2.ecifmdev.net/app/tririga"
   MAS_REST_API: "/html/en/default/rest/SSOConnect?userName={0}&adGroupName={1}"
   JWT_ISSUER_URI: "https://login.microsoftonline.com/c99cc570-ba4f-474e-897d-22255a3cecd7/v2.0"
   GRAPH_API_ENABLED: "true"
