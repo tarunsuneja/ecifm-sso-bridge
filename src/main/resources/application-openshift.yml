@@ -35,4 +35,5 @@ logging:
   level:
     com.ecifm.saml.bridge: DEBUG
     org.springframework.security: DEBUG
-    org.springframework.security.oauth2: DEBUG
+    org.springframework.security.oauth2: TRACE
+    org.springframework.security.oauth2.client: TRACE
