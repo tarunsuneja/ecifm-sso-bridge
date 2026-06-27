@@ -303,7 +303,7 @@ public class AcsHandlerController {
             @AuthenticationPrincipal OidcUser oidcUser,
             @RegisteredOAuth2AuthorizedClient("entra-id") OAuth2AuthorizedClient authorizedClient) {
 
-        String tririgaUrl = masBaseUrl + masContext;
+        String tririgaUrl = "https://auth.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/default-oidc";
 
         if (oidcUser == null || authorizedClient == null) {
             return buildPage("Not Logged In", "",
