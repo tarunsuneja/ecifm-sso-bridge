@@ -324,19 +324,20 @@ public class AcsHandlerController {
 
         log.info("SSO redirect for user: {}, groups: {}", email, groups);
 
-        boolean syncSucceeded = masSyncService.syncUser(accessToken, email, groups);
-
-        String status;
-        String message;
-        if (syncSucceeded) {
-            status = "success";
-            message = "Groups synced successfully to TRIRIGA.";
-        } else {
-            status = "error";
-            message = "SSOConnect API returned an error. TRIRIGA SSO app may not be configured yet.";
+        boolean syncSucceeded = false;
+        String syncMessage = "";
+        try {
+            syncSucceeded = masSyncService.syncUser(accessToken, email, groups);
+            syncMessage = syncSucceeded ? "Groups synced successfully to TRIRIGA."
+                    : "SSOConnect API returned an error. TRIRIGA SSO app may not be configured yet.";
+            log.info("SSOConnect sync result: {} - {}", syncSucceeded, syncMessage);
+        } catch (Exception e) {
+            log.error("SSOConnect sync failed with exception: {}", e.getMessage(), e);
+            syncMessage = "SSOConnect sync failed: " + e.getMessage();
         }
 
-        return buildPage(email, accessToken, groups, syncSucceeded, tririgaUrl, status, message);
+        return buildPage(email, accessToken, groups, syncSucceeded, tririgaUrl,
+                syncSucceeded ? "success" : "error", syncMessage);
     }
 
     private ResponseEntity<String> buildPage(String email, String accessToken,

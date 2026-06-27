@@ -33,5 +33,6 @@ entra-id:
 
 logging:
   level:
-    com.ecifm.saml.bridge: INFO
-    org.springframework.security: WARN
+    com.ecifm.saml.bridge: DEBUG
+    org.springframework.security: DEBUG
+    org.springframework.security.oauth2: DEBUG
