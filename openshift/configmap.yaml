@@ -5,6 +5,7 @@ metadata:
 data:
   MAS_BASE_URL: "https://main.facilities.inst1.apps.npos2.ecifmdev.net"
   MAS_CONTEXT: "/tririga"
+  MAS_REDIRECT_URL: "https://auth.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/default-oidc"
   MAS_REST_API: "/html/en/default/rest/SSOConnect?userName={0}&adGroupName={1}"
   JWT_ISSUER_URI: "https://login.microsoftonline.com/c99cc570-ba4f-474e-897d-22255a3cecd7/v2.0"
   GRAPH_API_ENABLED: "true"

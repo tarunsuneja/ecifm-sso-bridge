@@ -43,6 +43,9 @@ public class AcsHandlerController {
     @Value("${mas.context}")
     private String masContext;
 
+    @Value("${mas.redirect-url}")
+    private String masRedirectUrl;
+
     private final MasSyncService masSyncService;
     private final TririgaWsClient tririgaWsClient;
     private final ObjectMapper objectMapper;
@@ -303,7 +306,7 @@ public class AcsHandlerController {
             @AuthenticationPrincipal OidcUser oidcUser,
             @RegisteredOAuth2AuthorizedClient("entra-id") OAuth2AuthorizedClient authorizedClient) {
 
-        String tririgaUrl = "https://auth.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/default-oidc";
+        String tririgaUrl = masRedirectUrl;
 
         if (oidcUser == null || authorizedClient == null) {
             return buildPage("Not Logged In", "",

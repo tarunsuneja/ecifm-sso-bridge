@@ -19,6 +19,7 @@ spring:
 mas:
   base-url: ${MAS_BASE_URL}
   context: ${MAS_CONTEXT:/tririga}
+  redirect-url: ${MAS_REDIRECT_URL:https://auth.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/default-oidc}
   rest-api: ${MAS_REST_API:/html/en/default/rest/SSOConnect?userName={0}&adGroupName={1}}
 
 tririga:
