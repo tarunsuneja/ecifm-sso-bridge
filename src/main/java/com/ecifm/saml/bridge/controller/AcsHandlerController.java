@@ -66,7 +66,7 @@ public class AcsHandlerController {
     @GetMapping("/")
     public ResponseEntity<String> defaultLanding() {
         return ResponseEntity.status(HttpStatus.FOUND)
-                .header(HttpHeaders.LOCATION, masRedirectUrl)
+                .header(HttpHeaders.LOCATION, "/redirect")
                 .build();
     }
 
