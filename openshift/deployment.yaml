@@ -41,6 +41,11 @@ spec:
                 secretKeyRef:
                   name: ecifm-bridge-secrets
                   key: TRIRIGA_PASSWORD
+            - name: MAS_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: ecifm-bridge-secrets
+                  key: MAS_OIDC_CLIENT_SECRET
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness

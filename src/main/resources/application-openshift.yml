@@ -4,6 +4,8 @@ server:
 spring:
   security:
     oauth2:
+      authorizationserver:
+        issuer: ${BRIDGE_ISSUER_URL}
       client:
         registration:
           entra-id:
@@ -19,8 +21,12 @@ spring:
 mas:
   base-url: ${MAS_BASE_URL}
   context: ${MAS_CONTEXT:/tririga}
-  redirect-url: ${MAS_REDIRECT_URL:https://auth.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/default-oidc}
+  redirect-url: ${MAS_REDIRECT_URL:https://main.facilities.inst1.apps.npos2.ecifmdev.net/app/tririga}
   rest-api: ${MAS_REST_API:/html/en/default/rest/SSOConnect?userName={0}&adGroupName={1}}
+  oidc:
+    client-id: ${MAS_OIDC_CLIENT_ID:mas-facilities}
+    client-secret: ${MAS_OIDC_CLIENT_SECRET}
+    redirect-uri: ${MAS_OIDC_REDIRECT_URI:https://main.facilities.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/facilities}
 
 tririga:
   username: ${TRIRIGA_USERNAME}
