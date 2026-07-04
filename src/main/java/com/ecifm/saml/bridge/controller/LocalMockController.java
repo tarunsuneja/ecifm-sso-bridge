@@ -145,6 +145,13 @@ public class LocalMockController {
                 return client.getAccessToken().getTokenValue();
             }
         }
+        if (authentication != null) {
+            OAuth2AuthorizedClient client = authorizedClientService.loadAuthorizedClient(
+                    "entra-id", authentication.getName());
+            if (client != null && client.getAccessToken() != null) {
+                return client.getAccessToken().getTokenValue();
+            }
+        }
         return null;
     }
 

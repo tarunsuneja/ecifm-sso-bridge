@@ -38,7 +38,7 @@ public class SecurityConfig {
     public SecurityFilterChain localTestFilterChain(HttpSecurity http) throws Exception {
         http.securityMatcher("/local/**")
                 .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .csrf(csrf -> csrf.disable());
 
         return http.build();
