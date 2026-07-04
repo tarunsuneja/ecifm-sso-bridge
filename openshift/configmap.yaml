@@ -11,6 +11,7 @@ data:
   BRIDGE_ISSUER_URL: "https://ecifm-sso-bridge-ecifm-sso-bridge.apps.npos2.ecifmdev.net"
   MAS_OIDC_CLIENT_ID: "mas-facilities"
   MAS_OIDC_REDIRECT_URI: "https://main.facilities.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/facilities"
+  MAS_OAUTH_CLIENT_REDIRECT_URI: "https://auth.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/default-oidc"
   GRAPH_API_ENABLED: "true"
   SPRING_PROFILES_ACTIVE: "openshift"
   AZURE_CLIENT_ID: "cbcea157-2c35-4ce3-b86c-782282e00857"

@@ -41,17 +41,19 @@ public class AuthServerConfig {
     public RegisteredClientRepository registeredClientRepository(
             @Value("${mas.oidc.client-id}") String clientId,
             @Value("${mas.oidc.client-secret}") String clientSecret,
-            @Value("${mas.oidc.redirect-uri}") String redirectUri) {
+            @Value("${mas.oidc.redirect-uri}") String tririgaRedirectUri,
+            @Value("${mas.oauth.client-redirect-uri:}") String oauthClientRedirectUri) {
 
-        log.info("Registering OIDC client: {} with redirect URI: {}", clientId, redirectUri);
+        log.info("Registering OIDC client: {} with TRIRIGA redirect: {} and OAuth client redirect: {}",
+                clientId, tririgaRedirectUri, oauthClientRedirectUri);
 
-        RegisteredClient client = RegisteredClient.withId(UUID.randomUUID().toString())
+        RegisteredClient.Builder builder = RegisteredClient.withId(UUID.randomUUID().toString())
                 .clientId(clientId)
                 .clientSecret("{noop}" + clientSecret)
                 .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
                 .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_POST)
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
-                .redirectUri(redirectUri)
+                .redirectUri(tririgaRedirectUri)
                 .scope(OidcScopes.OPENID)
                 .scope(OidcScopes.PROFILE)
                 .scope(OidcScopes.EMAIL)
@@ -63,10 +65,13 @@ public class AuthServerConfig {
                         .idTokenSignatureAlgorithm(SignatureAlgorithm.RS256)
                         .authorizationCodeTimeToLive(Duration.ofMinutes(5))
                         .accessTokenTimeToLive(Duration.ofMinutes(15))
-                        .build())
-                .build();
+                        .build());
 
-        return new InMemoryRegisteredClientRepository(client);
+        if (oauthClientRedirectUri != null && !oauthClientRedirectUri.isBlank()) {
+            builder.redirectUri(oauthClientRedirectUri);
+        }
+
+        return new InMemoryRegisteredClientRepository(builder.build());
     }
 
     @Bean
