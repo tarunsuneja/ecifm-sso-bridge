@@ -4,19 +4,19 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.net.URL;
 import java.security.cert.X509Certificate;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
-import javax.xml.namespace.QName;
 
-import org.apache.cxf.binding.soap.SoapHeader;
 import org.apache.cxf.configuration.jsse.TLSClientParameters;
 import org.apache.cxf.endpoint.Client;
 import org.apache.cxf.frontend.ClientProxy;
-import org.apache.cxf.headers.Header;
 import org.apache.cxf.message.Message;
 import org.apache.cxf.transport.http.HTTPConduit;
 import org.apache.cxf.transports.http.configuration.HTTPClientPolicy;
@@ -24,8 +24,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
 
 import com.ecifm.saml.bridge.tririga.generated.dto.ApplicationInfo;
 import com.ecifm.saml.bridge.tririga.generated.ws.TririgaWS;
@@ -53,8 +51,12 @@ public class TririgaWsClient {
     private String tririgaPassword;
 
     public String getApplicationInfo() {
+        return getApplicationInfo(null);
+    }
+
+    public String getApplicationInfo(String preAuthJsessionId) {
         try {
-            TririgaWSPortType port = createPort();
+            TririgaWSPortType port = createPort(preAuthJsessionId);
             ApplicationInfo info = port.getApplicationInfo();
             log.info("getApplicationInfo succeeded: version={}", info.getApiVersion());
             return "Success:\n"
@@ -69,9 +71,9 @@ public class TririgaWsClient {
         }
     }
 
-    public String getHttpSession() {
+    public String getHttpSession(String jsessionId) {
         try {
-            TririgaWSPortType port = createPort();
+            TririgaWSPortType port = createPort(jsessionId);
             var session = port.getHttpSession();
             log.info("getHttpSession succeeded");
             return "Success:\n"
@@ -82,68 +84,39 @@ public class TririgaWsClient {
         }
     }
 
-    public String getApplicationInfoWithBearer(String token) {
+    public String getAuthenticatedSessionId() {
         try {
-            TririgaWSPortType port = createPortWithBearer(token);
-            ApplicationInfo info = port.getApplicationInfo();
-            log.info("getApplicationInfoWithBearer succeeded: version={}", info.getApiVersion());
-            return "Success:\n"
-                    + "  apiVersion: " + value(info.getApiVersion()) + "\n"
-                    + "  dbBuildNumber: " + value(info.getDbBuildNumber()) + "\n"
-                    + "  tririgaBuildNumber: " + value(info.getTririgaBuildNumber());
+            TririgaWSPortType port = createPort();
+            port.getApplicationInfo();
+            Client client = ClientProxy.getClient(port);
+            Map<String, List<String>> responseHeaders = (Map<String, List<String>>)
+                client.getResponseContext().get(Message.PROTOCOL_HEADERS);
+            if (responseHeaders != null) {
+                List<String> setCookie = responseHeaders.get("Set-Cookie");
+                if (setCookie != null) {
+                    for (String c : setCookie) {
+                        Matcher m = Pattern.compile("JSESSIONID=([^;]+)").matcher(c);
+                        if (m.find()) {
+                            String jsessionId = m.group(1);
+                            log.info("Extracted JSESSIONID from SOAP response: {}", jsessionId);
+                            return jsessionId;
+                        }
+                    }
+                }
+            }
+            log.warn("No JSESSIONID found in SOAP response headers");
+            return null;
         } catch (Exception e) {
-            StringWriter sw = new StringWriter();
-            e.printStackTrace(new PrintWriter(sw));
-            log.warn("getApplicationInfoWithBearer failed: {}\n{}", e.getMessage(), sw);
-            return "Failed: " + e.getMessage();
+            log.warn("getAuthenticatedSessionId failed: {}", e.getMessage());
+            return null;
         }
     }
 
-    private TririgaWSPortType createPortWithBearer(String bearerToken) throws Exception {
-        String ctx = masContext == null ? "" : masContext.trim().replaceAll("^/+|/+$", "");
-        String rawUrl = ctx.isEmpty() ? masBaseUrl + "/ws/TririgaWS" : masBaseUrl + "/" + ctx + "/ws/TririgaWS";
-        String endpoint = rawUrl.trim();
-        log.info("Creating CXF client (Bearer) for endpoint: {}", endpoint);
-
-        URL wsdlUrl = getClass().getResource(WSDL_RESOURCE);
-        TririgaWS service = new TririgaWS(wsdlUrl);
-        TririgaWSPortType port = service.getTririgaWSPort();
-
-        BindingProvider bp = (BindingProvider) port;
-        bp.getRequestContext().put(BindingProvider.ENDPOINT_ADDRESS_PROPERTY, endpoint);
-        bp.getRequestContext().put(BindingProvider.SESSION_MAINTAIN_PROPERTY, Boolean.TRUE);
-
-        Map<String, List<String>> headers = new HashMap<>();
-        headers.put("Authorization", List.of("Bearer " + bearerToken));
-        bp.getRequestContext().put(Message.PROTOCOL_HEADERS, headers);
-        log.info("Added Bearer token Authorization header");
-
-        Client client = ClientProxy.getClient(port);
-        HTTPConduit conduit = (HTTPConduit) client.getConduit();
-
-        HTTPClientPolicy policy = new HTTPClientPolicy();
-        policy.setConnectionTimeout(30_000);
-        policy.setReceiveTimeout(120_000);
-        policy.setAllowChunking(false);
-        conduit.setClient(policy);
-
-        TLSClientParameters tls = new TLSClientParameters();
-        tls.setDisableCNCheck(true);
-        tls.setTrustManagers(new TrustManager[]{
-            new X509TrustManager() {
-                public void checkClientTrusted(X509Certificate[] certs, String authType) {}
-                public void checkServerTrusted(X509Certificate[] certs, String authType) {}
-                public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
-            }
-        });
-        conduit.setTlsClientParameters(tls);
-
-        log.info("CXF client (Bearer) configured");
-        return port;
+    private TririgaWSPortType createPort() throws Exception {
+        return createPort(null);
     }
 
-    @SuppressWarnings("unchecked")
-    private TririgaWSPortType createPort() throws Exception {
+    private TririgaWSPortType createPort(String jsessionId) throws Exception {
         String ctx = masContext == null ? "" : masContext.trim().replaceAll("^/+|/+$", "");
         String rawUrl = ctx.isEmpty() ? masBaseUrl + "/ws/TririgaWS" : masBaseUrl + "/" + ctx + "/ws/TririgaWS";
         String endpoint = rawUrl.trim();
@@ -157,18 +130,15 @@ public class TririgaWsClient {
         bp.getRequestContext().put(BindingProvider.ENDPOINT_ADDRESS_PROPERTY, endpoint);
         bp.getRequestContext().put(BindingProvider.SESSION_MAINTAIN_PROPERTY, Boolean.TRUE);
 
-        Document doc = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
-        Element challenge = doc.createElementNS("http://soap-authentication.org/basic/2001/10/", "h:BasicChallenge");
-        Element userName = doc.createElement("Username");
-        userName.setTextContent(tririgaUsername.trim());
-        challenge.appendChild(userName);
-        Element password = doc.createElement("Password");
-        password.setTextContent(tririgaPassword);
-        challenge.appendChild(password);
-        List<Header> headerList = List.of(new SoapHeader(
-                new QName("http://soap-authentication.org/basic/2001/10/", "BasicChallenge", "h"), challenge));
-        bp.getRequestContext().put(Header.HEADER_LIST, headerList);
-        log.info("Added SOAP BasicChallenge header for user '{}'", tririgaUsername);
+        String basicValue = tririgaUsername + ":" + tririgaPassword;
+        String basicHeader = "Basic " + Base64.getEncoder().encodeToString(basicValue.getBytes());
+        Map<String, List<String>> headers = new HashMap<>();
+        headers.put("Authorization", List.of(basicHeader));
+        if (jsessionId != null && !jsessionId.isEmpty()) {
+            headers.put("Cookie", List.of("JSESSIONID=" + jsessionId));
+        }
+        bp.getRequestContext().put(Message.PROTOCOL_HEADERS, headers);
+        log.info("Added HTTP Basic Authorization header for user '{}'", tririgaUsername);
 
         Client client = ClientProxy.getClient(port);
         HTTPConduit conduit = (HTTPConduit) client.getConduit();
@@ -190,7 +160,7 @@ public class TririgaWsClient {
         });
         conduit.setTlsClientParameters(tls);
 
-        log.info("CXF client configured with SOAP BasicChallenge for user '{}'", tririgaUsername);
+        log.info("CXF client configured with HTTP Basic auth for user '{}'", tririgaUsername);
         return port;
     }
 

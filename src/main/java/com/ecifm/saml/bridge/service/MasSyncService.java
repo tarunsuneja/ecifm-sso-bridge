@@ -37,6 +37,6 @@ public class MasSyncService {
 
         log.info("Resolved groups for {}: {}", email, groupName);
 
-        return masApiClient.syncUserGroups(bearerToken, email, groupName);
+        return masApiClient.syncUserGroups(email, groupName);
     }
 }

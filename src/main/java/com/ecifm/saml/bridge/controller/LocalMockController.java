@@ -11,10 +11,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
-import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
-import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -39,12 +35,9 @@ public class LocalMockController {
     @Value("${tririga.password}")
     private String tririgaPassword;
 
-    private final OAuth2AuthorizedClientService authorizedClientService;
     private final TririgaWsClient tririgaWsClient;
 
-    public LocalMockController(OAuth2AuthorizedClientService authorizedClientService,
-            TririgaWsClient tririgaWsClient) {
-        this.authorizedClientService = authorizedClientService;
+    public LocalMockController(TririgaWsClient tririgaWsClient) {
         this.tririgaWsClient = tririgaWsClient;
     }
 
@@ -58,7 +51,7 @@ public class LocalMockController {
         log.info("Local mock SSOConnect called for userName: {} adGroupName: {}", userName, adGroupName);
 
         if (authHeader != null) {
-            log.info("Authorization header present: {}", authHeader.substring(0, Math.min(20, authHeader.length())) + "...");
+            log.info("Authorization header present: {}...", authHeader.substring(0, Math.min(20, authHeader.length())));
         }
 
         return ResponseEntity.ok("Local mock SSOConnect executed successfully");
@@ -66,73 +59,29 @@ public class LocalMockController {
 
     @GetMapping("/test-oslc")
     @ResponseBody
-    public ResponseEntity<String> testOslc(
-            @RequestHeader(value = "Authorization", required = false) String authHeader,
-            @RequestParam(value = "jsessionid", required = false) String jsessionid,
-            @RequestParam(value = "cookie", required = false) String rawCookie,
-            Authentication authentication) {
+    public ResponseEntity<String> testOslc() {
         String oslcUrl = "https://main.facilities.inst1.apps.npos2.ecifmdev.net/oslc/spq/triCurrentUserQC?oslc.select=*";
         log.info("Testing OSLC call to: {}", oslcUrl);
 
         StringBuilder result = new StringBuilder();
 
-        // Test 1: No auth
-        result.append("=== Test 1: No auth ===\n");
-        testCall(oslcUrl, null, null, result);
-
-        // Test 2: With Bearer token from Authorization header
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            result.append("\n=== Test 2: Bearer token ===\n");
-            testCall(oslcUrl, authHeader, null, result);
-        } else {
-            result.append("\n=== Test 2: Bearer token — SKIPPED (pass Authorization: Bearer <token>) ===\n");
-        }
-
-        // Test 3: With JSESSIONID as cookie
-        if (jsessionid != null && !jsessionid.isEmpty()) {
-            result.append("\n=== Test 3: JSESSIONID cookie ===\n");
-            testCall(oslcUrl, null, "JSESSIONID=" + jsessionid, result);
-        } else {
-            result.append("\n=== Test 3: JSESSIONID — SKIPPED (pass ?jsessionid=<value>) ===\n");
-        }
-
-        // Test 4: With raw Cookie header value
-        if (rawCookie != null && !rawCookie.isEmpty()) {
-            result.append("\n=== Test 4: Raw Cookie ===\n");
-            testCall(oslcUrl, null, rawCookie, result);
-        } else {
-            result.append("\n=== Test 4: Raw Cookie — SKIPPED (pass ?cookie=<raw-cookie-value>) ===\n");
-        }
-
-        // Test 5: With Entra ID access token from current session
-        String entraToken = getEntraAccessToken(authentication);
-        if (entraToken != null) {
-            result.append("\n=== Test 5: Entra ID Bearer token (OSLC) ===\n");
-            testCall(oslcUrl, "Bearer " + entraToken, null, result);
-
-            String ssoUrl = "https://main.facilities.inst1.apps.npos2.ecifmdev.net/html/en/default/rest/SSOConnect?userName=tarun.suneja@ecifm.com&adGroupName=ECIFM_TEST_GROUP";
-            result.append("\n=== Test 6: Entra ID Bearer token (SSOConnect REST) ===\n");
-            testCall(ssoUrl, "Bearer " + entraToken, null, result);
-
-            result.append("\n=== Test 7: Entra ID Bearer token (Business Connect SOAP) ===\n");
-            result.append(tririgaWsClient.getApplicationInfoWithBearer(entraToken)).append("\n");
-        } else {
-            result.append("\n=== Test 5: Entra ID Bearer token — SKIPPED (no active OAuth2 session) ===\n");
-        }
-
         String basicValue = tririgaUsername + ":" + tririgaPassword;
         String basicHeader = "Basic " + java.util.Base64.getEncoder().encodeToString(basicValue.getBytes());
         result.append("--- Credentials: user='").append(tririgaUsername).append("' pass_len=").append(tririgaPassword.length()).append(" basic64_len=").append(basicHeader.length()).append("\n");
 
-        result.append("\n=== Test 8: Basic auth (OSLC) ===\n");
-        testCall(oslcUrl, basicHeader, null, result);
-
-        String ssoUrl = "https://main.facilities.inst1.apps.npos2.ecifmdev.net/html/en/default/rest/SSOConnect?userName=tarun.suneja@ecifm.com&adGroupName=ECIFM_TEST_GROUP";
-        result.append("\n=== Test 9: Basic auth (SSOConnect REST) ===\n");
-        testCall(ssoUrl, basicHeader, null, result);
-
-        result.append("\n=== Test 10: Basic auth (Business Connect SOAP) ===\n");
+        result.append("\n=== Auth via SOAP (HTTP Basic) ===\n");
         result.append(tririgaWsClient.getApplicationInfo()).append("\n");
+
+        result.append("\n=== Authenticated session from SOAP ===\n");
+        String sessionId = tririgaWsClient.getAuthenticatedSessionId();
+        result.append("JSESSIONID: ").append(sessionId != null ? sessionId : "null").append("\n");
+
+        result.append("\n=== OSLC with authenticated session ===\n");
+        if (sessionId != null) {
+            testCall(oslcUrl, null, "JSESSIONID=" + sessionId, result);
+        } else {
+            result.append("No session available\n");
+        }
 
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_PLAIN)
@@ -166,25 +115,6 @@ public class LocalMockController {
         } catch (Exception e) {
             result.append("Error: ").append(e.getMessage()).append("\n");
         }
-    }
-
-    private String getEntraAccessToken(Authentication authentication) {
-        if (authentication instanceof OAuth2AuthenticationToken oauthToken
-                && "entra-id".equals(oauthToken.getAuthorizedClientRegistrationId())) {
-            OAuth2AuthorizedClient client = authorizedClientService.loadAuthorizedClient(
-                    "entra-id", oauthToken.getName());
-            if (client != null && client.getAccessToken() != null) {
-                return client.getAccessToken().getTokenValue();
-            }
-        }
-        if (authentication != null) {
-            OAuth2AuthorizedClient client = authorizedClientService.loadAuthorizedClient(
-                    "entra-id", authentication.getName());
-            if (client != null && client.getAccessToken() != null) {
-                return client.getAccessToken().getTokenValue();
-            }
-        }
-        return null;
     }
 
     @GetMapping("/mock-redirect")

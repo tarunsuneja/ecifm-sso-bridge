@@ -37,9 +37,11 @@ public class MasApiClient {
     private String masRestApi;
 
     private final RestTemplate restTemplate;
+    private final TririgaWsClient tririgaWsClient;
 
-    public MasApiClient(RestTemplateBuilder restTemplateBuilder) {
+    public MasApiClient(RestTemplateBuilder restTemplateBuilder, TririgaWsClient tririgaWsClient) {
         this.restTemplate = restTemplateBuilder.build();
+        this.tririgaWsClient = tririgaWsClient;
         disableSslVerification();
     }
 
@@ -56,21 +58,27 @@ public class MasApiClient {
             sc.init(null, trustAll, new SecureRandom());
             HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
             HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
-            log.warn("SSL verification disabled for outbound HTTPS connections to MAS");
+            log.warn("SSL verification disabled for outbound HTTPS connections");
         } catch (Exception e) {
             throw new RuntimeException("Failed to disable SSL verification", e);
         }
     }
 
-    public boolean syncUserGroups(String bearerToken, String userName, String groupName) {
-        log.info("Syncing user groups to MAS: userName={}, groupName={}", userName, groupName);
+    public boolean syncUserGroups(String userName, String groupName) {
+        log.info("Syncing user groups: userName={}, groupName={}", userName, groupName);
 
         try {
+            String jsessionId = tririgaWsClient.getAuthenticatedSessionId();
+            if (jsessionId == null) {
+                log.error("Failed to obtain authenticated session from TRIRIGA");
+                return false;
+            }
+
             String url = buildUrl(userName, groupName);
-            log.info("MAS SSOConnect URL: {}", url);
+            log.info("SSOConnect URL: {}", url);
 
             HttpHeaders headers = new HttpHeaders();
-            headers.setBearerAuth(bearerToken);
+            headers.set("Cookie", "JSESSIONID=" + jsessionId);
 
             HttpEntity<Void> entity = new HttpEntity<>(headers);
             ResponseEntity<String> response = restTemplate.exchange(
@@ -79,19 +87,19 @@ public class MasApiClient {
                     entity,
                     String.class);
 
-            log.info("MAS response status: {}", response.getStatusCode());
+            log.info("SSOConnect response status: {}", response.getStatusCode());
 
             if (!response.getStatusCode().is2xxSuccessful()) {
-                log.error("MAS SSOConnect failed with status: {}", response.getStatusCode());
+                log.error("SSOConnect failed with status: {}", response.getStatusCode());
                 return false;
             }
 
-            log.info("MAS response body: {}", response.getBody());
-            log.info("User groups synced successfully to MAS");
+            log.info("SSOConnect response body: {}", response.getBody());
+            log.info("User groups synced successfully");
             return true;
 
         } catch (Exception e) {
-            log.error("Failed to sync user groups to MAS: {}", e.getMessage(), e);
+            log.error("Failed to sync user groups: {}", e.getMessage(), e);
             return false;
         }
     }
