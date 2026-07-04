@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.CookieValue;
 
 @RestController
 @RequestMapping("/local")
@@ -46,7 +47,9 @@ public class LocalMockController {
     @GetMapping("/test-oslc")
     @ResponseBody
     public ResponseEntity<String> testOslc(
-            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @RequestParam(value = "jsessionid", required = false) String jsessionid,
+            @RequestParam(value = "cookie", required = false) String rawCookie) {
         String oslcUrl = "https://main.facilities.inst1.apps.npos2.ecifmdev.net/oslc/spq/triCurrentUserQC?oslc.select=*";
         log.info("Testing OSLC call to: {}", oslcUrl);
 
@@ -54,14 +57,30 @@ public class LocalMockController {
 
         // Test 1: No auth
         result.append("=== Test 1: No auth ===\n");
-        testCall(oslcUrl, null, result);
+        testCall(oslcUrl, null, null, result);
 
-        // Test 2: With Bearer token from Authorization header (your Entra ID session)
+        // Test 2: With Bearer token from Authorization header
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            result.append("\n=== Test 2: Bearer token (your Entra ID session) ===\n");
-            testCall(oslcUrl, authHeader, result);
+            result.append("\n=== Test 2: Bearer token ===\n");
+            testCall(oslcUrl, authHeader, null, result);
         } else {
             result.append("\n=== Test 2: Bearer token — SKIPPED (pass Authorization: Bearer <token>) ===\n");
+        }
+
+        // Test 3: With JSESSIONID as cookie
+        if (jsessionid != null && !jsessionid.isEmpty()) {
+            result.append("\n=== Test 3: JSESSIONID cookie ===\n");
+            testCall(oslcUrl, null, "JSESSIONID=" + jsessionid, result);
+        } else {
+            result.append("\n=== Test 3: JSESSIONID — SKIPPED (pass ?jsessionid=<value>) ===\n");
+        }
+
+        // Test 4: With raw Cookie header value
+        if (rawCookie != null && !rawCookie.isEmpty()) {
+            result.append("\n=== Test 4: Raw Cookie ===\n");
+            testCall(oslcUrl, null, rawCookie, result);
+        } else {
+            result.append("\n=== Test 4: Raw Cookie — SKIPPED (pass ?cookie=<raw-cookie-value>) ===\n");
         }
 
         return ResponseEntity.ok()
@@ -69,12 +88,15 @@ public class LocalMockController {
                 .body(result.toString());
     }
 
-    private void testCall(String url, String authHeader, StringBuilder result) {
+    private void testCall(String url, String authHeader, String cookie, StringBuilder result) {
         try {
             HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
             conn.setRequestMethod("GET");
             if (authHeader != null) {
                 conn.setRequestProperty("Authorization", authHeader);
+            }
+            if (cookie != null) {
+                conn.setRequestProperty("Cookie", cookie);
             }
             conn.setConnectTimeout(10000);
             conn.setReadTimeout(15000);
