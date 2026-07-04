@@ -96,8 +96,12 @@ public class LocalMockController {
         // Test 5: With Entra ID access token from current session
         String entraToken = getEntraAccessToken(authentication);
         if (entraToken != null) {
-            result.append("\n=== Test 5: Entra ID Bearer token (from session) ===\n");
+            result.append("\n=== Test 5: Entra ID Bearer token (OSLC) ===\n");
             testCall(oslcUrl, "Bearer " + entraToken, null, result);
+
+            String ssoUrl = "https://main.facilities.inst1.apps.npos2.ecifmdev.net/html/en/default/rest/SSOConnect?userName=tarun.suneja@ecifm.com&adGroupName=ECIFM_TEST_GROUP";
+            result.append("\n=== Test 6: Entra ID Bearer token (SSOConnect REST) ===\n");
+            testCall(ssoUrl, "Bearer " + entraToken, null, result);
         } else {
             result.append("\n=== Test 5: Entra ID Bearer token — SKIPPED (no active OAuth2 session) ===\n");
         }
