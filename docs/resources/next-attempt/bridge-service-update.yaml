@@ -1,0 +1,26 @@
+# Annotate bridge service with serving-cert-secret-name so OpenShift
+# generates a TLS cert signed by the OpenShift service CA.
+# Liberty will trust this cert once the service CA is added to the IDPCfg truststore.
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: ecifm-sso-bridge-tls
+  labels:
+    app: ecifm-sso-bridge
+    app.kubernetes.io/component: ecifm-sso-bridge
+    app.kubernetes.io/instance: ecifm-sso-bridge
+    app.kubernetes.io/name: ecifm-sso-bridge
+  name: ecifm-sso-bridge
+  namespace: ecifm-sso-bridge
+spec:
+  ports:
+  - name: 8080-tcp
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: ecifm-sso-bridge
+    deploymentconfig: ecifm-sso-bridge
+  sessionAffinity: None
+  type: ClusterIP
