@@ -120,7 +120,9 @@ public class LocalMockController {
             result.append("\n=== Test 5: Entra ID Bearer token — SKIPPED (no active OAuth2 session) ===\n");
         }
 
-        String basicHeader = "Basic " + java.util.Base64.getEncoder().encodeToString((tririgaUsername + ":" + tririgaPassword).getBytes());
+        String basicValue = tririgaUsername + ":" + tririgaPassword;
+        String basicHeader = "Basic " + java.util.Base64.getEncoder().encodeToString(basicValue.getBytes());
+        result.append("--- Credentials: user='").append(tririgaUsername).append("' pass_len=").append(tririgaPassword.length()).append(" basic64_len=").append(basicHeader.length()).append("\n");
 
         result.append("\n=== Test 8: Basic auth (OSLC) ===\n");
         testCall(oslcUrl, basicHeader, null, result);
