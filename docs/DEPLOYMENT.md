@@ -1,9 +1,9 @@
 # ecifm-saml-bridge — OIDC IdP Deployment Guide
 
 > **Version:** 0.2.0 — OIDC Identity Provider (IdP) architecture  
-> **Date:** 2026-06-29  
-> **Cluster:** NPOS2  
-> **Target:** MAS/TRIRIGA on OpenShift
+> **Date:** 2026-07-04  
+> **Cluster:** NPOS2 (this doc)  
+> **Target:** Any MAS/TRIRIGA environment on OpenShift
 
 ---
 
@@ -11,17 +11,20 @@
 
 1. [Architecture Overview](#1-architecture-overview)
 2. [Prerequisites](#2-prerequisites)
-3. [Step 1 — Verify Azure AD App Registration](#3-step-1--verify-azure-ad-app-registration)
-4. [Step 2 — Generate the MAS OIDC Client Secret](#4-step-2--generate-the-mas-oidc-client-secret)
-5. [Step 3 — Build the Bridge JAR](#5-step-3--build-the-bridge-jar)
-6. [Step 4 — Build and Push the Docker Image](#6-step-4--build-and-push-the-docker-image)
-7. [Step 5 — Update OpenShift Resources](#7-step-5--update-openshift-resources)
-8. [Step 6 — Deploy to OpenShift](#8-step-6--deploy-to-openshift)
-9. [Step 7 — Verify the Bridge Is Running](#9-step-7--verify-the-bridge-is-running)
-10. [Step 8 — Configure MAS Admin UI OIDC Provider](#10-step-8--configure-mas-admin-ui-oidc-provider)
-11. [Step 9 — Test the Full Flow](#11-step-9--test-the-full-flow)
-12. [Troubleshooting](#12-troubleshooting)
-13. [Appendices](#13-appendices)
+3. [Step 1 — Register an Entra ID App for the Bridge](#3-step-1--register-an-entra-id-app-for-the-bridge)
+4. [Step 2 — Create the TLS Certificate](#4-step-2--create-the-tls-certificate)
+5. [Step 3 — Generate the MAS OIDC Client Secret](#5-step-3--generate-the-mas-oidc-client-secret)
+6. [Step 4 — Create OpenShift Secrets](#6-step-4--create-openshift-secrets)
+7. [Step 5 — Create the ConfigMap](#7-step-5--create-the-configmap)
+8. [Step 6 — Create the Route](#8-step-6--create-the-route)
+9. [Step 7 — Create the Service and Deployment](#9-step-7--create-the-service-and-deployment)
+10. [Step 8 — Build and Deploy](#10-step-8--build-and-deploy)
+11. [Step 9 — Configure MAS Liberty OIDC Client (IDPCfg)](#11-step-9--configure-mas-liberty-oidc-client-idpcfg)
+12. [Step 10 — Verify the Bridge Is Running](#12-step-10--verify-the-bridge-is-running)
+13. [Step 11 — Test the Full Flow](#13-step-11--test-the-full-flow)
+14. [Step 12 — Rollback Plan](#14-step-12--rollback-plan)
+15. [Troubleshooting](#15-troubleshooting)
+16. [Appendices](#16-appendices)
 
 ---
 
@@ -35,81 +38,82 @@ Before this change, the bridge authenticated users with Entra ID (Azure AD) and 
 
 The bridge is now a **trusted OIDC Identity Provider** for MAS/Liberty. MAS delegates authentication to the bridge, and the bridge proxies authentication to Entra ID. This matches exactly how TRIRIGA's OIDC SSO path works internally.
 
-### 1.3 Request Flow
+### 1.3 Component Architecture
 
 ```
-User visits TRIRIGA
-     │
-     ▼
-MAS TRIRIGA SPA loads
-     │
-     ▼
-MAS Liberty checks for session ─── Has session? ──► TRIRIGA home page
-     │
-     ▼ No session
-Liberty redirects to /oidcclient/redirect/facilities
-     │
-     ▼
-Liberty OIDC client sends /authorize request to Bridge
-     │
-     ▼
-Bridge receives GET /oauth2/authorize?response_type=code&client_id=mas-facilities&...
-     │
-     ▼ (AS filter chain @Order(1) — not authenticated)
-LoginUrlAuthenticationEntryPoint → redirect to /oauth2/authorization/entra-id
-     │
-     ▼
-Bridge OAuth2 client chain @Order(3) — redirects browser to Entra ID
-     │
-     ▼
-Entra ID login page (or silent SSO if already authenticated in browser)
-     │
-     ▼ User authenticates
-Entra ID redirects back to bridge: /login/oauth2/code/entra-id?code=...
-     │
-     ▼
-Bridge exchanges code with Entra ID, receives OidcUser
-     │
-     ▼
-AuthenticationSuccessHandler retrieves original saved request from RequestCache
-     │
-     ▼
-Bridge redirects browser back to its own /oauth2/authorize (with cookies now)
-     │
-     ▼
-AS filter chain @Order(1) — user IS authenticated
-     │
-     ▼
-Bridge generates authorization code, redirects to Liberty callback:
-   https://main.facilities.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/facilities?code=...
-     │
-     ▼
-Liberty receives authorization code
-     │
-     ▼
-Liberty calls bridge POST /oauth2/token with client_assertion (private_key_jwt)
-     │
-     ▼
-Bridge validates client credentials, returns:
-   { access_token, id_token (RS256 signed), token_type: "Bearer", expires_in }
-     │
-     ▼
-Liberty validates the id_token signature via bridge /oauth2/jwks
-     │
-     ▼
-Liberty extracts preferred_username claim → sets as UserPrincipal
-     │
-     ▼
-TRIRIGA UserSessionFilter detects WSSubject.getRunAsSubject() is populated
-     │
-     ▼
-TRIRIGA creates session automatically
-     │
-     ▼
-User lands on TRIRIGA home page — zero clicks
+┌──────────────────────────────────────────────────────────────────┐
+│                        MAS Cluster (mas-inst1-core)              │
+│                                                                  │
+│  ┌──────────┐     ┌──────────┐     ┌──────────────────────┐     │
+│  │ TRIRIGA  │────▶│ Liberty  │────▶│ CoreIDP (IDPCfg)    │     │
+│  │ (SPA)    │     │ (OP)     │     │ - OIDC client        │     │
+│  └──────────┘     │          │     │ - Truststore JKS     │     │
+│                   │          │     └──────────┬───────────┘     │
+│                   └──────────┘                │                 │
+│                                               │ TLS to bridge   │
+└───────────────────────────────────────────────┼─────────────────┘
+                                                │
+                    ┌───────────────────────────┘
+                    ▼
+        ┌──────────────────────────────────────┐
+        │   ecifm-saml-bridge (bridge)          │
+        │                                       │
+        │  ┌──────────────────────────────┐     │
+        │  │ SecurityConfig              │     │
+        │  │  ├── Chain 1: AS endpoints  │     │
+        │  │  ├── Chain 2: /local/*      │     │
+        │  │  └── Chain 3: oauth2Login   │     │
+        │  └──────────────────────────────┘     │
+        │                                       │
+        │  ┌──────────────────────────────┐     │
+        │  │ AuthServerConfig             │     │
+        │  │  ├── Client registration    │     │
+        │  │  ├── JWK Source (RS256)     │     │
+        │  │  └── Token customizer       │     │
+        │  └──────────────────────────────┘     │
+        │                                       │
+        │  ┌──────────────────────────────┐     │
+        │  │ Spring Security OAuth2       │     │
+        │  │  ├── Entra ID as upstream   │     │
+        │  │  └── OidcUser mapping       │     │
+        │  └──────────────────────────────┘     │
+        └──────────────────┬───────────────────┘
+                           │
+                           ▼
+        ┌──────────────────────────────────────┐
+        │   Microsoft Entra ID (Azure AD)      │
+        │   Tenant: c99cc570-...               │
+        │   App: cbcea157-...                  │
+        └──────────────────────────────────────┘
 ```
 
-### 1.4 OIDC Token Claims
+### 1.4 Full Authentication Flow
+
+```
+Step 1:  User → TRIRIGA (main.facilities...)
+Step 2:  TRIRIGA → Liberty OP (auth.inst1.../MaximoAppSuite)
+         Liberty checks cookies, finds no mas-oidc=oidc session
+Step 3:  Liberty → Bridge (ecifm-sso-bridge.../oauth2/authorize)
+         ?client_id=mas-facilities
+         &redirect_uri=https://auth.inst1.../oidcclient/redirect/default-oidc
+         &response_type=code&scope=openid
+Step 4:  Bridge (chain 1) → redirects to /oauth2/authorization/entra-id
+Step 5:  Bridge (chain 3) → redirects to Entra ID login
+         https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize
+Step 6:  User authenticates with Entra ID
+Step 7:  Entra ID → redirects to bridge /login/oauth2/code/entra-id
+         with auth code
+Step 8:  Bridge exchanges code with Entra ID, gets OidcUser
+Step 9:  Bridge redirects back to Liberty's redirect_uri
+         https://auth.inst1.../oidcclient/redirect/default-oidc?code=xxx&state=yyy
+Step 10: Liberty → Bridge /oauth2/token (client_secret_basic auth)
+         exchanges code for ID token + access token
+Step 11: Liberty validates ID token signature via bridge's JWKS endpoint
+         extracts preferred_username → sets UserPrincipal
+Step 12: Liberty → TRIRIGA with authenticated user
+```
+
+### 1.5 OIDC Token Claims
 
 The bridge's ID token includes the following claims (customized from Entra ID's OidcUser):
 
@@ -122,7 +126,7 @@ The bridge's ID token includes the following claims (customized from Entra ID's 
 
 Liberty maps `preferred_username` to the `UserPrincipal`, which TRIRIGA's `AuthenticationHandler.getUserIdFromRequest()` reads to auto-create the user session.
 
-### 1.5 Key Differences from Old Architecture
+### 1.6 Key Differences from Old Architecture
 
 | Aspect | Old (v0.1.0) | New (v0.2.0) |
 |--------|-------------|-------------|
@@ -131,6 +135,22 @@ Liberty maps `preferred_username` to the `UserPrincipal`, which TRIRIGA's `Authe
 | User action required | Must click "Microsoft" button on Liberty form login | Zero clicks |
 | Security | Bearer token validation | OIDC Authorization Code flow + RS256 signed ID tokens |
 | Token format | JWT from MAS SSO | ID token signed by bridge's RSA key |
+
+### 1.7 Key Architecture Discoveries
+
+During implementation, these critical insights were discovered:
+
+1. **Internal cluster TLS**: From inside the cluster, the OpenShift route presents a **self-signed ingress-operator certificate**, NOT the Let's Encrypt certificate visible from outside. Any frontend that terminates TLS behind the route replaces the external cert.
+
+2. **Java PKIX and self-signed certs**: Java PKIX validation rejects self-signed certs even when added to the truststore as a `trustedCertEntry`. The signature of a self-signed cert cannot be verified against itself in the context of path validation. A proper CA → leaf cert chain is required.
+
+3. **Liberty OIDC client redirect URI**: Liberty's OIDC client (`default-oidc`) sends its **own** callback URL (`auth.inst1.../oidcclient/redirect/default-oidc`) as the `redirect_uri` parameter in the `/oauth2/authorize` request to the bridge. This is the Liberty OP's own callback endpoint — NOT the TRIRIGA application redirect. The bridge's OAuth2 Authorization Server must register **both** redirect URIs:
+   - TRIRIGA's callback: `main.facilities.../oidcclient/redirect/facilities`
+   - Liberty's callback: `auth.inst1.../oidcclient/redirect/default-oidc`
+
+4. **Service CA SAN limitation**: Annotating the bridge service with `service.beta.openshift.io/serving-cert-secret-name` injects a service-serving certificate, but its SAN only contains `*.svc` DNS names — it will never match a route hostname.
+
+5. **All 3 MAS apps share one CoreIDP**: MAS routes TRIRIGA, Maximo Assist, and Monitor through the same CoreIDP (`mas-inst1-core`). Changing the `IDPCfg` resource shifts authentication for **all** applications simultaneously.
 
 ---
 
@@ -144,361 +164,645 @@ Liberty maps `preferred_username` to the `UserPrincipal`, which TRIRIGA's `Authe
 | Maven | 3.9+ | Build the JAR |
 | Docker / Podman | latest | Build container image |
 | OpenShift CLI (`oc`) | 4.x | Deploy to OpenShift |
-| OpenShift cluster access | admin | Update ConfigMap, Secret, Deployment |
+| OpenShift cluster access | admin | Create namespaces, secrets, routes |
 | MAS Admin UI access | admin | Configure OIDC provider |
+| OpenSSL | any | Generate certificates and secrets |
 
-### 2.2 Environment URLs (NPOS2)
+### 2.2 Information to Gather
+
+Before starting, collect these environment-specific values:
+
+| Item | Example | Where to Find |
+|------|---------|---------------|
+| OpenShift cluster API URL | `https://api.npos2.ecifmdev.net:6443` | Cluster admin |
+| OpenShift ingress domain | `apps.npos2.ecifmdev.net` | Cluster admin |
+| MAS instance namespace | `mas-inst1-core` | MAS installation |
+| MAS domain | `inst1.apps.npos2.ecifmdev.net` | MAS installation |
+| Liberty OP hostname | `auth.inst1.apps.npos2.ecifmdev.net` | OpenShift route in MAS namespace |
+| TRIRIGA route hostname | `main.facilities.inst1.apps.npos2.ecifmdev.net` | OpenShift route |
+| MAS admin credentials | `maxadmin` | MAS installation |
+| Entra ID tenant ID | `c99cc570-ba4f-474e-897d-22255a3cecd7` | Azure AD overview page |
+| Truststore password | `L4i5gKLuCxC4iEhc` | From MAS secret or existing IDPCfg |
+
+### 2.3 NPOS2 Environment URLs
 
 | Component | URL |
 |-----------|-----|
 | Bridge | `https://ecifm-sso-bridge-ecifm-sso-bridge.apps.npos2.ecifmdev.net` |
 | TRIRIGA | `https://main.facilities.inst1.apps.npos2.ecifmdev.net/app/tririga` |
 | MAS Liberty auth | `https://auth.inst1.apps.npos2.ecifmdev.net` |
-| Liberty OIDC callback | `https://main.facilities.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/facilities` |
+| TRIRIGA OIDC callback | `https://main.facilities.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/facilities` |
+| Liberty OIDC callback | `https://auth.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/default-oidc` |
 | Entra ID tenant | `c99cc570-ba4f-474e-897d-22255a3cecd7` |
 | Azure AD app client ID | `cbcea157-2c35-4ce3-b86c-782282e00857` |
 
 ---
 
-## 3. Step 1 — Verify Azure AD App Registration
+## 3. Step 1 — Register an Entra ID App for the Bridge
 
-The bridge uses TRIRIGA's existing Azure AD app registration. **No new Azure app is needed.** You only need to verify the redirect URI is registered.
+If using an existing Entra ID app (like TRIRIGA's existing registration), skip to [§3.2](#32-verify-redirect-uri).
 
-### 3.1 Locate the App
+### 3.1 Create a New App Registration
 
-1. Go to **https://portal.azure.com**
-2. Navigate to **Microsoft Entra ID** → **App registrations**
-3. Search for the app with client ID `cbcea157-2c35-4ce3-b86c-782282e00857` (likely named "TRIRIGA" or "ecifm-tririga")
+1. Go to **Azure Portal → Microsoft Entra ID → App registrations → New registration**
+2. Name: `ecifm-saml-bridge-<env>` (e.g., `ecifm-saml-bridge-prod`)
+3. Supported account types: **Accounts in this organizational directory only** (single tenant)
+4. Redirect URI (Web): `https://<bridge-route-hostname>/login/oauth2/code/entra-id`
+   - If you don't know the hostname yet, skip this and add it later
+5. Click **Register**
+6. Note the **Application (client) ID** and **Directory (tenant) ID**
 
 ### 3.2 Verify Redirect URI
 
+Whether creating new or using existing:
+
 1. In the app registration, select **Authentication** (left menu)
-2. Under **Web** → **Redirect URIs**, confirm this is present:
+2. Under **Web → Redirect URIs**, ensure this is present:
 
    ```
-   https://ecifm-sso-bridge-ecifm-sso-bridge.apps.npos2.ecifmdev.net/login/oauth2/code/entra-id
+   https://<bridge-route-hostname>/login/oauth2/code/entra-id
    ```
 
 3. If missing, click **Add URI**, paste the URL, and **Save**
 
-### 3.3 Check Client Secret
+### 3.3 Create/Verify Client Secret
 
-1. Select **Certificates & secrets** → **Client secrets**
-2. Verify there is a valid client secret (will be used as `AZURE_CLIENT_SECRET`)
-3. If expired or missing, create a new one:
-   - Click **New client secret**
+1. Select **Certificates & secrets → Client secrets**
+2. Click **New client secret**
    - Description: `ecifm-saml-bridge`
-   - Expires: Choose appropriate period (recommended: 12 or 24 months)
-   - **Copy the secret value immediately** — it will not be shown again
-4. You will need this value for the OpenShift Secret (see [Step 5.3](#53-secret))
+   - Expires: 12 or 24 months
+3. **Copy the secret value immediately** — it will not be shown again
 
-### 3.4 API Permissions (Optional — for Graph API fallback)
+### 3.4 API Permissions (Optional)
 
-If you use the Microsoft Graph API fallback (for JWT tokens with >200 groups):
+If using Microsoft Graph API fallback (for JWT tokens with >200 groups):
 
 1. Select **API permissions**
-2. Ensure these delegated permissions are present:
+2. Add delegated permissions:
    - `Microsoft Graph / GroupMember.Read.All`
    - `Microsoft Graph / User.Read`
-3. Click **Grant admin consent** if needed
-
-### 3.5 Token Configuration (Optional)
-
-If you need group claims in the token:
-
-1. Select **Manifest** (left menu)
-2. Find the `groupMembershipClaims` property and set it to:
-
-   ```json
-   "groupMembershipClaims": "SecurityGroup"
-   ```
+3. Click **Grant admin consent**
 
 ---
 
-## 4. Step 2 — Generate the MAS OIDC Client Secret
+## 4. Step 2 — Create the TLS Certificate
 
-The bridge acts as an OIDC IdP for MAS/Liberty. MAS needs a shared secret when exchanging authorization codes for tokens at the bridge's `/oauth2/token` endpoint.
+**Critical requirement**: The certificate presented by the bridge route must be trusted by MAS/Liberty's Java truststore. You **cannot** use a self-signed cert — Java PKIX validation requires a proper CA chain.
 
-### 4.1 Generate a Random Secret
+### Option A: Internal CA (Recommended for Dev/Test)
 
-Run this command on any machine with OpenSSL installed:
+This approach works in any cluster without external dependencies.
+
+#### 4a.1 Generate the Internal CA (one-time per environment)
+
+```bash
+# Generate CA private key
+openssl genrsa -out internal-ca.key 4096
+
+# Self-sign the CA certificate (10-year validity)
+openssl req -x509 -new -nodes -key internal-ca.key -sha256 -days 3650 \
+  -out internal-ca.crt \
+  -subj "/CN=<ENV>-Internal-CA"
+
+# Example:
+# openssl req -x509 -new -nodes -key internal-ca.key -sha256 -days 3650 \
+#   -out internal-ca.crt \
+#   -subj "/CN=NPOS2-Internal-CA"
+```
+
+#### 4a.2 Generate the Bridge TLS Certificate
+
+```bash
+# Generate bridge private key
+openssl genrsa -out bridge-tls.key 2048
+
+# Create CSR
+openssl req -new -key bridge-tls.key -out bridge-tls.csr \
+  -subj "/CN=<bridge-route-hostname>"
+
+# Create cert config with SAN
+cat > bridge-tls.ext <<EOF
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+keyUsage=digitalSignature,nonRepudiation,keyEncipherment,dataEncipherment
+subjectAltName=DNS:<bridge-route-hostname>
+EOF
+
+# Sign the cert with the internal CA
+openssl x509 -req -in bridge-tls.csr -CA internal-ca.crt -CAkey internal-ca.key \
+  -CAcreateserial -out bridge-tls.crt -days 365 -sha256 -extfile bridge-tls.ext
+```
+
+#### 4a.3 Create the Full Chain
+
+```bash
+# Chain = bridge cert + CA cert (in that order)
+cat bridge-tls.crt internal-ca.crt > bridge-tls-chain.crt
+```
+
+#### 4a.4 Create the TLS Secret
+
+```bash
+oc create secret tls bridge-tls-secret -n ecifm-sso-bridge \
+  --cert=bridge-tls-chain.crt --key=bridge-tls.key
+```
+
+**Keep `internal-ca.crt`** — you will need it for the IDPCfg certificates section (Step 9).
+
+### Option B: Let's Encrypt (with cert-manager)
+
+If the cluster has cert-manager and the domain is public:
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ecifm-sso-bridge-tls
+  namespace: ecifm-sso-bridge
+spec:
+  secretName: bridge-tls-secret
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+  - <bridge-route-hostname>
+```
+
+### Option C: OpenShift Default Ingress Cert
+
+Only use this if you know the cluster's default ingress CA cert and can add it to the MAS truststore. This is generally not recommended because:
+1. The ingress CA cert varies by cluster
+2. Future cluster upgrades may rotate the CA
+
+---
+
+## 5. Step 3 — Generate the MAS OIDC Client Secret
+
+This is the shared secret between the bridge and MAS Liberty. It must be the **exact same value** in both places.
 
 ```bash
 openssl rand -base64 32
 ```
 
-**Example output:** `uF6kR9sJ2nL4pQ7wX1zC5vB8mN3hT0yA`
+**Example output:** `fMkWmZx8qZ8d9R/f+40lWrZJlTCzpwprxGqoWxXURU4=`
 
-> **Security note:** This secret is shared between the bridge and MAS. Store it securely. Anyone with this secret can impersonate MAS to the bridge.
-
-### 4.2 Save the Secret
-
-You will need this value in two places:
-1. **OpenShift Secret** — `MAS_OIDC_CLIENT_SECRET` (see [Step 5.3](#53-secret))
-2. **MAS Admin UI** — OIDC Provider Client Secret (see [Step 8](#8-step-8--configure-mas-admin-ui-oidc-provider))
+This value will be used in:
+1. The bridge's `ecifm-bridge-secrets` secret (Step 4)
+2. The Liberty OIDC client credentials secret (Step 9)
 
 ---
 
-## 5. Step 3 — Build the Bridge JAR
+## 6. Step 4 — Create OpenShift Secrets
 
-### 5.1 Set JAVA_HOME
+### 6.1 Create the Namespace
 
-```powershell
-$env:JAVA_HOME = "C:\Program Files\Java\jdk-17"
+```bash
+oc new-project ecifm-sso-bridge
 ```
 
-### 5.2 Build
+### 6.2 Create Azure AD Credentials Secret
 
-```powershell
-mvn clean package -DskipTests
+```bash
+oc create secret generic azure-ad-credentials -n ecifm-sso-bridge \
+  --from-literal=AZURE_CLIENT_ID=<app-client-id> \
+  --from-literal=AZURE_CLIENT_SECRET=<app-client-secret> \
+  --from-literal=JWT_ISSUER_URI=https://login.microsoftonline.com/<tenant-id>/v2.0
 ```
 
-**Output:** `target/ecifm-saml-bridge.jar`
+### 6.3 Create Bridge OIDC Client Secret
 
-### 5.3 Verify the Build
-
-```powershell
-# Check the JAR exists and size
-ls target/ecifm-saml-bridge.jar
-
-# Quick sanity check — list the Spring Boot auto-configuration classes
-jar tf target/ecifm-saml-bridge.jar | findstr "AuthServerConfig"
+```bash
+oc create secret generic ecifm-bridge-secrets -n ecifm-sso-bridge \
+  --from-literal=MAS_OIDC_CLIENT_SECRET=<secret-from-step-3>
 ```
 
-Expected: `AuthServerConfig.class` is listed.
+If you also use the TRIRIGA REST API or Graph API, add:
 
----
-
-## 6. Step 4 — Build and Push the Docker Image
-
-### 6.1 Build the Image
-
-```powershell
-docker build -t ecifm-saml-bridge:0.2.0 .
-```
-
-### 6.2 Tag and Push (if using external registry)
-
-```powershell
-# Tag for your registry
-docker tag ecifm-saml-bridge:0.2.0 your-registry/ecifm-saml-bridge:0.2.0
-docker tag ecifm-saml-bridge:0.2.0 your-registry/ecifm-saml-bridge:latest
-
-# Push
-docker push your-registry/ecifm-saml-bridge:0.2.0
-docker push your-registry/ecifm-saml-bridge:latest
-```
-
-### 6.3 OpenShift Internal Registry
-
-If using the OpenShift internal image registry:
-
-```powershell
-# Login to the OpenShift registry
-oc registry login
-
-# Tag for the internal registry
-docker tag ecifm-saml-bridge:0.2.0 image-registry.openshift-image-registry.svc:5000/tririga/ecifm-sso-bridge:0.2.0
-docker tag ecifm-saml-bridge:0.2.0 image-registry.openshift-image-registry.svc:5000/tririga/ecifm-sso-bridge:latest
-
-# Push
-docker push image-registry.openshift-image-registry.svc:5000/tririga/ecifm-sso-bridge:latest
+```bash
+oc create secret generic ecifm-bridge-secrets -n ecifm-sso-bridge \
+  --from-literal=MAS_OIDC_CLIENT_SECRET=<secret-from-step-3> \
+  --from-literal=AZURE_CLIENT_SECRET=<azure-client-secret> \
+  --from-literal=TRIRIGA_PASSWORD=<tririga-service-password>
 ```
 
 ---
 
-## 7. Step 5 — Update OpenShift Resources
+## 7. Step 5 — Create the ConfigMap
 
-### 7.1 ConfigMap
-
-Navigate to **Workloads** → **ConfigMaps** → `ecifm-bridge-config` → **YAML** tab → **Edit**
-
-Replace with the full configuration below. The three new entries are `BRIDGE_ISSUER_URL`, `MAS_OIDC_CLIENT_ID`, and `MAS_OIDC_REDIRECT_URI`.
+Create `openshift/configmap.yaml`:
 
 ```yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: ecifm-bridge-config
+  namespace: ecifm-sso-bridge
 data:
-  MAS_BASE_URL: "https://main.facilities.inst1.apps.npos2.ecifmdev.net"
+  # Bridge OIDC issuer (must match route hostname exactly)
+  BRIDGE_ISSUER_URL: "https://<bridge-route-hostname>"
+
+  # MAS base URL (TRIRIGA domain)
+  MAS_BASE_URL: "https://<mas-domain>"
+
+  # TRIRIGA context path
   MAS_CONTEXT: "/tririga"
-  MAS_REDIRECT_URL: "https://main.facilities.inst1.apps.npos2.ecifmdev.net/app/tririga"
+
+  # Post-login redirect URL in TRIRIGA
+  MAS_REDIRECT_URL: "https://<mas-domain>/app/tririga"
+
+  # SSOConnect REST endpoint for group sync
   MAS_REST_API: "/html/en/default/rest/SSOConnect?userName={0}&adGroupName={1}"
-  JWT_ISSUER_URI: "https://login.microsoftonline.com/c99cc570-ba4f-474e-897d-22255a3cecd7/v2.0"
-  BRIDGE_ISSUER_URL: "https://ecifm-sso-bridge-ecifm-sso-bridge.apps.npos2.ecifmdev.net"
+
+  # MAS OIDC client configuration
   MAS_OIDC_CLIENT_ID: "mas-facilities"
-  MAS_OIDC_REDIRECT_URI: "https://main.facilities.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/facilities"
+  MAS_OIDC_REDIRECT_URI: "https://<mas-domain>/oidcclient/redirect/facilities"
+
+  # Liberty OIDC client callback (the redirect_uri that Liberty sends to the bridge)
+  MAS_OAUTH_CLIENT_REDIRECT_URI: "https://<liberty-op-hostname>/oidcclient/redirect/default-oidc"
+
+  # Entra ID issuer
+  JWT_ISSUER_URI: "https://login.microsoftonline.com/<tenant-id>/v2.0"
+
+  # Entra ID app client ID
+  AZURE_CLIENT_ID: "<app-client-id>"
+
+  # TRIRIGA service account (for SOAP calls)
+  TRIRIGA_USERNAME: "<service-account-email>"
+
+  # Enable Microsoft Graph API fallback
   GRAPH_API_ENABLED: "true"
+
+  # Spring profile
   SPRING_PROFILES_ACTIVE: "openshift"
-  AZURE_CLIENT_ID: "cbcea157-2c35-4ce3-b86c-782282e00857"
-  TRIRIGA_USERNAME: "tarun.suneja@ecifm.com"
 ```
 
-**What each ConfigMap entry does:**
+Apply:
 
-| Key | Value | Purpose |
-|-----|-------|---------|
-| `MAS_BASE_URL` | TRIRIGA route URL | Base URL for TRIRIGA |
-| `MAS_CONTEXT` | `/tririga` | TRIRIGA context path |
-| `MAS_REDIRECT_URL` | Full TRIRIGA app URL | Where users land after auth |
-| `MAS_REST_API` | SSOConnect path | REST endpoint for group sync |
-| `JWT_ISSUER_URI` | Entra ID v2.0 issuer | Tells bridge where to validate incoming tokens |
-| `BRIDGE_ISSUER_URL` | Bridge's own URL | **NEW** — Tells bridge its own issuer for OIDC discovery |
-| `MAS_OIDC_CLIENT_ID` | `mas-facilities` | **NEW** — Client ID that MAS uses to identify itself to the bridge |
-| `MAS_OIDC_REDIRECT_URI` | Liberty callback URL | **NEW** — Where MAS Liberty sends the auth code |
-| `GRAPH_API_ENABLED` | `true` | Enables Graph API fallback for large groups |
-| `SPRING_PROFILES_ACTIVE` | `openshift` | Activates `application-openshift.yml` |
-| `AZURE_CLIENT_ID` | Entra ID app client ID | Bridge's identity for Entra ID |
-| `TRIRIGA_USERNAME` | Service account email | Used for TRIRIGA SOAP calls |
+```bash
+oc apply -f openshift/configmap.yaml
+```
 
-### 7.2 References in `application-openshift.yml`
+---
 
-The bridge reads these environment variables from the ConfigMap (via `envFrom`). The relevant mappings in `application-openshift.yml` are:
+## 8. Step 6 — Create the Route
+
+Create `openshift/route.yaml`:
 
 ```yaml
-spring:
-  security:
-    oauth2:
-      authorizationserver:
-        issuer: ${BRIDGE_ISSUER_URL}
-      client:
-        registration:
-          entra-id:
-            client-id: ${AZURE_CLIENT_ID}
-            client-secret: ${AZURE_CLIENT_SECRET}
-            authorization-grant-type: authorization_code
-            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
-            scope: openid, profile, email
-mas:
-  oidc:
-    client-id: ${MAS_OIDC_CLIENT_ID:mas-facilities}
-    client-secret: ${MAS_OIDC_CLIENT_SECRET}
-    redirect-uri: ${MAS_OIDC_REDIRECT_URI:https://main.facilities.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/facilities}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: ecifm-sso-bridge
+  namespace: ecifm-sso-bridge
+spec:
+  host: <bridge-route-hostname>
+  port:
+    targetPort: 8080
+  tls:
+    termination: reencrypt
+    # Reference the TLS secret created in Step 2
+    key: <contents of bridge-tls.key>
+    certificate: <contents of bridge-tls-chain.crt>
+    # OR reference the secret directly:
+  to:
+    kind: Service
+    name: ecifm-sso-bridge
+    weight: 100
+  wildcardPolicy: None
 ```
 
-### 7.3 Secret
+**Important**: With `termination: reencrypt` + the custom cert, OpenShift terminates TLS at the route edge using your cert, then re-encrypts to the pod. If you don't set `destinationCACertificate`, OpenShift re-encrypts using the cluster's service CA (which has `*.svc` SANs only). To fix this, either:
 
-Navigate to **Workloads** → **Secrets** → `ecifm-bridge-secrets` → **YAML** tab → **Edit**
+1. Set `destinationCACertificate` to your internal CA cert, OR
+2. Use `termination: passthrough` (TLS goes straight to the pod)
+
+For simplicity with internal CA, use `passthrough`:
+
+```yaml
+  tls:
+    termination: passthrough
+```
+
+---
+
+## 9. Step 7 — Create the Service and Deployment
+
+### 9.1 Service
+
+Create `openshift/service.yaml`:
 
 ```yaml
 apiVersion: v1
-kind: Secret
+kind: Service
 metadata:
-  name: ecifm-bridge-secrets
-type: Opaque
-stringData:
-  AZURE_CLIENT_SECRET: "<your-azure-client-secret>"
-  TRIRIGA_PASSWORD: "TR@maspassword2!"
-  MAS_OIDC_CLIENT_SECRET: "uF6kR9sJ2nL4pQ7wX1zC5vB8mN3hT0yA"
+  name: ecifm-sso-bridge
+  namespace: ecifm-sso-bridge
+spec:
+  ports:
+  - name: 8080-tcp
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: ecifm-sso-bridge
+  type: ClusterIP
 ```
 
-**Values to fill in:**
+### 9.2 Deployment
 
-| Key | Value Source |
-|-----|-------------|
-| `AZURE_CLIENT_SECRET` | From Azure AD app registration (Certificates & Secrets). This is the secret for client ID `cbcea157-2c35-4ce3-b86c-782282e00857`. |
-| `TRIRIGA_PASSWORD` | The service account password for `tarun.suneja@ecifm.com` (used for SOAP calls). |
-| `MAS_OIDC_CLIENT_SECRET` | The random secret you generated in [Step 2](#4-step-2--generate-the-mas-oidc-client-secret). |
-
-> **Azure Client Secret is external:** You must get the current `AZURE_CLIENT_SECRET` value from the existing deployment or from Azure. It is NOT stored in git. If you don't have it, create a new one in Azure and use that.
-
-### 7.4 Deployment
-
-Navigate to **Workloads** → **Deployments** → `ecifm-sso-bridge` → **YAML** tab → **Edit**
-
-The deployment already has the `MAS_OIDC_CLIENT_SECRET` env var added (from the git changes). Verify it is present under `spec.template.spec.containers[0].env`:
+Create `openshift/deployment.yaml`:
 
 ```yaml
-            - name: AZURE_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: ecifm-bridge-secrets
-                  key: AZURE_CLIENT_SECRET
-            - name: TRIRIGA_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: ecifm-bridge-secrets
-                  key: TRIRIGA_PASSWORD
-            - name: MAS_OIDC_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: ecifm-bridge-secrets
-                  key: MAS_OIDC_CLIENT_SECRET
-```
-
-**Note:** The ConfigMap values (`BRIDGE_ISSUER_URL`, `MAS_OIDC_CLIENT_ID`, `MAS_OIDC_REDIRECT_URI`) do NOT need individual `env` entries — they are injected automatically via the `envFrom: configMapRef` at the top of the container spec:
-
-```yaml
-          envFrom:
-            - configMapRef:
-                name: ecifm-bridge-config
-```
-
-**Image reference:** Update the image tag if needed:
-
-```yaml
-          image: image-registry.openshift-image-registry.svc:5000/tririga/ecifm-sso-bridge:latest
-```
-
-Or point to your external registry:
-
-```yaml
-          image: your-registry/ecifm-saml-bridge:0.2.0
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ecifm-sso-bridge
+  namespace: ecifm-sso-bridge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ecifm-sso-bridge
+  template:
+    metadata:
+      labels:
+        app: ecifm-sso-bridge
+    spec:
+      containers:
+      - name: bridge
+        image: image-registry.openshift-image-registry.svc:5000/ecifm-sso-bridge/ecifm-sso-bridge:latest
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: ecifm-bridge-config
+        - secretRef:
+            name: azure-ad-credentials
+        - secretRef:
+            name: ecifm-bridge-secrets
+        livenessProbe:
+          httpGet:
+            path: /actuator/health/liveness
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8080
+          initialDelaySeconds: 20
+          periodSeconds: 5
 ```
 
 ---
 
-## 8. Step 6 — Deploy to OpenShift
+## 10. Step 8 — Build and Deploy
 
-### 8.1 Trigger a Rolling Update
+### Option A: OpenShift Build (Source-to-Image)
 
-```powershell
-oc rollout restart deployment/ecifm-sso-bridge
+```bash
+# From the project root directory
+oc new-build --name ecifm-sso-bridge \
+  --image-stream=java:17 \
+  --binary=true \
+  -n ecifm-sso-bridge
+
+oc start-build ecifm-sso-bridge --from-dir=. --wait -n ecifm-sso-bridge
+
+# Tag for traceability
+oc tag ecifm-sso-bridge:latest ecifm-sso-bridge:v0.2.0 -n ecifm-sso-bridge
 ```
 
-### 8.2 Watch the Rollout
+### Option B: Docker Build (Local)
 
-```powershell
-oc rollout status deployment/ecifm-sso-bridge -w
+```bash
+docker build -t ecifm-sso-bridge:v0.2.0 .
+
+# Push to registry
+docker tag ecifm-sso-bridge:v0.2.0 <registry>/ecifm-sso-bridge:v0.2.0
+docker push <registry>/ecifm-sso-bridge:v0.2.0
 ```
 
-Expected output: `deployment "ecifm-sso-bridge" successfully rolled out`
-
-### 8.3 Check Pod Status
+### Option C: Maven + Docker (Windows Dev Machine)
 
 ```powershell
-oc get pods -l app=ecifm-sso-bridge
+# 1. Build JAR
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-17"
+mvn clean package -DskipTests
+
+# 2. Build Docker image
+docker build -t ecifm-saml-bridge:0.2.0 .
+
+# 3. Tag for OpenShift internal registry
+oc registry login
+docker tag ecifm-saml-bridge:0.2.0 image-registry.openshift-image-registry.svc:5000/ecifm-sso-bridge/ecifm-sso-bridge:latest
+docker push image-registry.openshift-image-registry.svc:5000/ecifm-sso-bridge/ecifm-sso-bridge:latest
 ```
 
-Expected: all pods in `Running` state with `1/1` ready.
+### 10.1 Deploy
+
+```bash
+oc apply -f openshift/service.yaml -n ecifm-sso-bridge
+oc apply -f openshift/route.yaml -n ecifm-sso-bridge
+oc apply -f openshift/deployment.yaml -n ecifm-sso-bridge
+
+# Watch rollout
+oc rollout status deployment/ecifm-sso-bridge -n ecifm-sso-bridge -w
+```
 
 ---
 
-## 9. Step 7 — Verify the Bridge Is Running
+## 11. Step 9 — Configure MAS Liberty OIDC Client (IDPCfg)
 
-### 9.1 Basic Health Check
+This is the **most critical step**. You configure MAS's CoreIDP to trust the bridge as an OIDC provider.
 
-```powershell
-curl https://ecifm-sso-bridge-ecifm-sso-bridge.apps.npos2.ecifmdev.net/test
+### 11.1 Locate the IDPCfg resource
+
+```bash
+# Find the correct namespace (usually mas-<instance>-core)
+oc get idpcfg -n mas-inst1-core
+
+# Save current config for rollback
+oc get idpcfg <name> -n mas-inst1-core -o yaml > idpcfg-current-backup.yaml
 ```
 
-Expected: `ecifm-saml-bridge is running`
+### 11.2 Create the OIDC Client Credentials Secret
 
-### 9.2 OIDC Discovery Endpoint
+MAS/Liberty needs a Kubernetes Secret containing the OIDC client credentials for the bridge.
 
-```powershell
-curl https://ecifm-sso-bridge-ecifm-sso-bridge.apps.npos2.ecifmdev.net/.well-known/openid-configuration
+```bash
+oc create secret generic -n mas-inst1-core \
+  inst1-usersupplied-oidc-bridge-creds-system \
+  --from-literal=clientId=mas-facilities \
+  --from-literal=clientSecret=<secret-from-step-3>
 ```
 
-Expected: A JSON response with OIDC metadata including:
+**CRITICAL**: The `clientSecret` value here must be **exactly the same** as the `MAS_OIDC_CLIENT_SECRET` in the bridge's `ecifm-bridge-secrets` secret. If they don't match, the token exchange at `/oauth2/token` fails with `client_secret does not match`.
+
+### 11.3 Update the IDPCfg
+
+The IDPCfg resource has an `oidc` section. If it doesn't exist yet, you need to add it. If there's a `samlIdp` section being replaced, remove or comment it out.
+
+Create `idpcfg-updated.yaml`:
+
+```yaml
+apiVersion: authentication.mas.ibm.com/v1
+kind: IDPCfg
+metadata:
+  name: <idpcfg-name>
+  namespace: mas-inst1-core
+spec:
+  # ... keep existing spec fields (authCache, etc.) ...
+
+  oidc:
+    discoveryEndpoint: "https://<bridge-route-hostname>/.well-known/openid-configuration"
+    authority: "https://<bridge-route-hostname>"
+    clientId: "mas-facilities"
+    clientSecret:
+      secretName: "inst1-usersupplied-oidc-bridge-creds-system"
+    clockSkew: 300
+    issuerIdentifier: "https://<bridge-route-hostname>"
+
+    # The CA cert that signed the bridge's TLS certificate
+    # (from Step 2 - Option A: internal-ca.crt)
+    certificates:
+      - alias: "<env>-Internal-CA"
+        certificate: |
+          -----BEGIN CERTIFICATE-----
+          ... contents of internal-ca.crt ...
+          -----END CERTIFICATE-----
+
+    # REQUIRED: Prevents infinite redirect loop
+    authFilter: "mas-oidc=oidc"
+```
+
+**Key fields explained:**
+
+| Field | Value | Purpose |
+|-------|-------|---------|
+| `discoveryEndpoint` | Bridge's OIDC discovery URL | Liberty fetches OIDC metadata from here |
+| `authority` | Bridge issuer URL | Used for token validation |
+| `clientId` | `mas-facilities` | Must match `MAS_OIDC_CLIENT_ID` in bridge ConfigMap |
+| `clientSecret.secretName` | Name of the K8s secret | The Secret created in step 11.2 |
+| `clockSkew` | `300` seconds | Allows 5-minute clock skew between bridge and MAS |
+| `issuerIdentifier` | Bridge issuer URL | Validates the `iss` claim in ID tokens |
+| `certificates` | TLS CA certificate | Added to Liberty's JKS truststore so TLS to bridge succeeds |
+| `authFilter` | `mas-oidc=oidc` | Cookie-based filter: only redirect to bridge if this cookie is present |
+
+### 11.4 Apply the IDPCfg
+
+```bash
+oc apply -f idpcfg-updated.yaml -n mas-inst1-core
+```
+
+### 11.5 Verify the Configuration was Applied
+
+After applying, two things happen asynchronously:
+
+#### 11.5.1 Truststore Worker
+
+The operator's truststore worker picks up the change and adds the CA cert to Liberty's JKS truststore:
+
+```bash
+oc logs -n mas-inst1-core -l app.kubernetes.io/name=ibm-mas-operator --tail=50 | grep -i truststore
+```
+
+Expected output:
+```
+Processing truststore update...
+Adding certificate <env>-Internal-CA to truststore...
+Truststore update completed.
+```
+
+To verify the cert was added:
+
+```bash
+# Exec into a MAS pod to check the truststore
+oc exec -n mas-inst1-core <coreidp-pod> -- keytool -list -keystore /etc/mas/certs/truststore/truststore.jks \
+  -storepass <truststore-password> | grep -i internal
+```
+
+Expected: `ecifm-internal-ca, <date>, trustedCertEntry`
+
+#### 11.5.2 CoreIDP Restart
+
+The CoreIDP pod restarts with the new OIDC client config. Watch for these success messages:
+
+```bash
+oc logs -n mas-inst1-core -l app.ibm.com/app=coreidp --tail=100 -f
+```
+
+Look for:
+```
+CWWKS1526I: The OpenID Connect client [default-oidc] configuration has been established.
+CWWKS1700I: OpenID Connect client default-oidc configuration successfully processed.
+```
+
+These confirm:
+- The bridge's OIDC discovery endpoint was reachable from Liberty
+- The TLS handshake succeeded (truststore has the CA cert)
+- The OIDC client was configured with the bridge's metadata
+
+If you see `CWPKI0823E: SSL handshake failed` or `CWPKI0020E: SSL error`, the TLS certificate chain is not trusted. Check:
+1. The CA cert in IDPCfg `certificates` matches the CA that signed the bridge cert
+2. The bridge route presents the full chain (bridge cert + CA cert)
+
+### 11.6 How Liberty Was Configured (Reference)
+
+In our NPOS2 implementation, Liberty's OIDC client config is at `/tmp/writeable/opt/was/liberty/wlp/usr/oidc/oidc.xml` inside the CoreIDP pod:
+
+```xml
+<oidc:client id="default-oidc"
+  clientId="mas-facilities"
+  clientSecret="fMkWmZx8qZ8d9R/f+40lWrZJlTCzpwprxGqoWxXURU4="
+  displayName="Entra AD OIDC Bridge"
+  scope="openid profile email"
+  signAlg="RS256"
+  tokenEndpointAuthMethod="client_secret_basic"
+  httpsRequired="true"
+  realmName="oidc"
+  redirectToRPHostAndPort="auth.inst1.apps.npos2.ecifmdev.net"
+  redirectToRPPortContextPath="/oidcclient/redirect/default-oidc"
+  authFilterRequestUrl="https://main.facilities.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/facilities"
+  authFilterId="mas-oidc">
+  <authFilter id="mas-oidc">
+    <requestUrl id="mas-oidc-url"
+      urlPattern="https://main.facilities.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/facilities"
+      matchType="contains"/>
+    <cookie id="mas-oidc-cookie"
+      name="mas-oidc"
+      value="oidc"
+      matchType="equals"
+      required="false"/>
+  </authFilter>
+</oidc:client>
+```
+
+---
+
+## 12. Step 10 — Verify the Bridge Is Running
+
+### 12.1 Basic Health Check
+
+```bash
+curl -k https://<bridge-route-hostname>/actuator/health
+# Expected: {"status":"UP"}
+```
+
+### 12.2 OIDC Discovery Endpoint
+
+```bash
+curl -k https://<bridge-route-hostname>/.well-known/openid-configuration
+```
+
+Expected JSON:
 
 ```json
 {
-  "issuer": "https://ecifm-sso-bridge-ecifm-sso-bridge.apps.npos2.ecifmdev.net",
-  "authorization_endpoint": "https://ecifm-sso-bridge-ecifm-sso-bridge.apps.npos2.ecifmdev.net/oauth2/authorize",
-  "token_endpoint": "https://ecifm-sso-bridge-ecifm-sso-bridge.apps.npos2.ecifmdev.net/oauth2/token",
-  "jwks_uri": "https://ecifm-sso-bridge-ecifm-sso-bridge.apps.npos2.ecifmdev.net/oauth2/jwks",
+  "issuer": "https://<bridge-route-hostname>",
+  "authorization_endpoint": "https://<bridge-route-hostname>/oauth2/authorize",
+  "token_endpoint": "https://<bridge-route-hostname>/oauth2/token",
+  "jwks_uri": "https://<bridge-route-hostname>/oauth2/jwks",
   "scopes_supported": ["openid", "profile", "email"],
   "response_types_supported": ["code"],
   "grant_types_supported": ["authorization_code"],
@@ -507,13 +811,13 @@ Expected: A JSON response with OIDC metadata including:
 }
 ```
 
-### 9.3 JWKS Endpoint
+### 12.3 JWKS Endpoint
 
-```powershell
-curl https://ecifm-sso-bridge-ecifm-sso-bridge.apps.npos2.ecifmdev.net/oauth2/jwks
+```bash
+curl -k https://<bridge-route-hostname>/oauth2/jwks
 ```
 
-Expected: A JSON Web Key Set with one RSA public key (2048-bit, RS256):
+Expected:
 
 ```json
 {
@@ -528,327 +832,269 @@ Expected: A JSON Web Key Set with one RSA public key (2048-bit, RS256):
 }
 ```
 
-### 9.4 Check Pod Logs
+### 12.4 Check Pod Logs
 
-```powershell
-oc logs -l app=ecifm-sso-bridge --tail=30
+```bash
+oc logs -n ecifm-sso-bridge -l app=ecifm-sso-bridge --tail=30
 ```
 
-Look for the startup marker lines:
+Look for startup markers:
 
 ```
 === OAuth2 Configuration ===
-AZURE_CLIENT_ID: cbcea157-2c35-4ce3-b86c-782282e00857
+AZURE_CLIENT_ID: <app-client-id>
 AZURE_CLIENT_SECRET length: 40
-JWT_ISSUER_URI: https://login.microsoftonline.com/c99cc570-ba4f-474e-897d-22255a3cecd7/v2.0
-BRIDGE_ISSUER_URL: https://ecifm-sso-bridge-ecifm-sso-bridge.apps.npos2.ecifmdev.net
+JWT_ISSUER_URI: https://login.microsoftonline.com/<tenant-id>/v2.0
+BRIDGE_ISSUER_URL: https://<bridge-route-hostname>
 MAS_OIDC_CLIENT_ID: mas-facilities
-MAS_OIDC_REDIRECT_URI: https://main.facilities.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/facilities
-```
-
-And later:
-
-```
-Registering OIDC client: mas-facilities with redirect URI: https://main.facilities.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/facilities
+MAS_OIDC_REDIRECT_URI: https://<mas-domain>/oidcclient/redirect/facilities
+=============================
+Registering OIDC client: mas-facilities with TRIRIGA redirect: ... and OAuth client redirect: ...
 Generating RSA key pair for OIDC token signing
 ```
 
-### 9.5 Verify Authorization Endpoint (Browser Redirect Test)
+### 12.5 Verify from Inside the Cluster
 
-Open a browser and visit:
-
-```
-https://ecifm-sso-bridge-ecifm-sso-bridge.apps.npos2.ecifmdev.net/oauth2/authorize?response_type=code&client_id=mas-facilities&redirect_uri=https://main.facilities.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/facilities&scope=openid&state=test
-```
-
-You should be redirected to the Entra ID login page (or pass through silently if you already have an active session). After authenticating, you'll be redirected back to an endpoint on the bridge. This confirms the AS filter chain is working.
-
----
-
-## 10. Step 8 — Configure MAS Admin UI OIDC Provider
-
-### 10.1 Access MAS Admin UI
-
-1. Open `https://admin.inst1.apps.npos2.ecifmdev.net` in a browser
-2. Log in with admin credentials (e.g., `maxadmin`)
-
-### 10.2 Navigate to OIDC Configuration
-
-1. Go to **Manage Applications** (or **Access Management** depending on MAS version)
-2. Find **IBM MAS** → **Manage Authentication**
-3. Or navigate to **Manage Authentication** directly from the left menu
-
-### 10.3 Configure or Edit the OIDC Provider
-
-Look for **OIDC Authentication** or **Identity Providers**.
-
-If there is an existing Entra ID provider (pointing directly to Azure AD):
-
-1. Click **Edit** on the existing provider
-2. Update the values below
-
-If creating a new one:
-
-1. Click **Create** or **Add OIDC Provider**
-
-**Provider Settings:**
-
-| Field | Value | Notes |
-|-------|-------|-------|
-| **Display Name** | `Entra AD SSO` | Or keep existing name |
-| **Client ID** | `mas-facilities` | Must match `MAS_OIDC_CLIENT_ID` in ConfigMap |
-| **Client Secret** | The secret from [Step 2](#4-step-2--generate-the-mas-oidc-client-secret) | Must match `MAS_OIDC_CLIENT_SECRET` in Secret |
-| **Discovery endpoint** | `https://ecifm-sso-bridge-ecifm-sso-bridge.apps.npos2.ecifmdev.net/.well-known/openid-configuration` | Bridge's OIDC discovery URL |
-| **Signature Algorithm** | `RS256` | Must match the bridge's token signing algorithm |
-| **User Identifier (JWT)** | `preferred_username` | The claim Liberty uses to identify the user |
-| **Token Endpoint Authentication Method** | `Client Secret Post` | The bridge supports both `client_secret_basic` and `client_secret_post` |
-| **Issuer** | (Leave blank — auto-discovered) | Discovery endpoint provides this |
-| **Scope** | `openid profile email` | Requested scopes |
-
-### 10.4 Save and Restart MAS Auth
-
-1. Click **Save**
-2. MAS may prompt you to **Restart** the authentication service — if so, confirm the restart
-3. Wait 1-2 minutes for the auth pod to restart
-
-### 10.5 Verify MAS OIDC Configuration (Optional)
-
-If you have shell access to the MAS infrastructure:
+Exec into any pod in the same cluster and test TLS:
 
 ```bash
-# Check the auth pod logs for OIDC provider registration
-oc logs -l app=mas-auth --tail=20
+oc exec <any-pod> -- curl -v https://<bridge-route-hostname>/.well-known/openid-configuration
 ```
 
-Look for lines indicating the OIDC provider was configured with the bridge's discovery endpoint.
+Check that the TLS handshake succeeds (no certificate errors).
 
 ---
 
-## 11. Step 9 — Test the Full Flow
+## 13. Step 11 — Test the Full Flow
 
-### 11.1 First-Time Test (Incognito Window)
+### 13.1 First-Time Test (Incognito Window)
 
-1. Open an **incognito/private** browser window (to ensure no cached sessions)
-2. Navigate to: `https://main.facilities.inst1.apps.npos2.ecifmdev.net/app/tririga`
+1. Open an **incognito/private** browser window
+2. Navigate to: `https://<mas-domain>/app/tririga`
 3. Observe the redirect chain:
    - TRIRIGA SPA loads
-   - Redirected to Liberty auth server (`auth.inst1.apps.npos2.ecifmdev.net`)
-   - Liberty redirects to bridge (`ecifm-sso-bridge-ecifm-sso-bridge.apps.npos2.ecifmdev.net/oauth2/authorize`)
+   - Redirected to Liberty auth server
+   - Liberty redirects to bridge (`/oauth2/authorize`)
    - Bridge redirects to Entra ID (`login.microsoftonline.com`)
    - **Enter your credentials** (first time only)
    - Redirected back to bridge, then to Liberty, then to TRIRIGA
 4. **Result:** You land on the TRIRIGA home page
 
-### 11.2 Subsequent Tests (Should Be Zero Clicks)
+### 13.2 Subsequent Tests (Should Be Zero Clicks)
 
 1. Open another incognito window
-2. Navigate to `https://main.facilities.inst1.apps.npos2.ecifmdev.net/app/tririga`
+2. Navigate to TRIRIGA
 3. **Result:** Zero clicks — you land directly on the TRIRIGA home page
-   - This works because your browser has an active session with Entra ID (or the bridge issues a session cookie after the first successful auth)
 
-### 11.3 Verify in Bridge Logs
+### 13.3 Verify in Bridge Logs
 
-```powershell
-# Watch the bridge logs in real-time
-oc logs -l app=ecifm-sso-bridge --tail=50 -f
+```bash
+oc logs -n ecifm-sso-bridge -l app=ecifm-sso-bridge --tail=50 -f
 ```
 
-When a user authenticates, you should see log output like:
+Expected log sequence during a login:
 
 ```
-=== OAuth2 Configuration ===
-...
-Received authorization request for client: mas-facilities
-User authenticated via Entra ID: tarun.suneja@ecifm.com
-Issuing authorization code for client: mas-facilities
-Token request for client: mas-facilities, grant_type: authorization_code
-Generated ID token for user: tarun.suneja@ecifm.com
+Saved request https://<bridge>/oauth2/authorize?... to session
+Redirecting to https://<bridge>/oauth2/authorization/entra-id
+Redirecting to https://login.microsoftonline.com/...
+Retrieved SecurityContextImpl [Authentication=OAuth2AuthenticationToken [...preferred_username=user@domain...]]
+Retrieved registered client
+Validated authorization code request parameters
+Generated authorization code
+Saved authorization
+Redirecting to https://<liberty-op>/oidcclient/redirect/default-oidc?code=...
+Client authentication failed: [invalid_client] ... (if secret mismatch)
 ```
-
-### 11.4 What to Check If It Doesn't Work
-
-If you encounter errors, check:
-
-1. **Bridge logs** — Look for Spring Security debug output (`DEBUG` level logging is enabled)
-2. **MAS Liberty logs** — Errors with OIDC token validation (token signature, claims, etc.)
-3. **Browser developer tools** → **Network** tab — Follow the redirect chain to see where it breaks
-4. See [Troubleshooting](#12-troubleshooting) section below
 
 ---
 
-## 12. Troubleshooting
+## 14. Step 12 — Rollback Plan
 
-### 12.1 "401 Unauthorized" from MAS Liberty
+To revert to the previous authentication method (e.g., direct Entra AD):
 
-**Symptoms:** Liberty returns a 401 error after OIDC callback.
+```bash
+# 1. Restore the original IDPCfg from backup
+oc apply -f idpcfg-backup.yaml -n mas-inst1-core
 
-**Causes:**
-- MAS OIDC client secret mismatch between bridge and MAS Admin UI
-- Token signature validation failure (Liberty can't reach bridge JWKS endpoint)
-- Clock skew between bridge pod and MAS pod (JWT `iat`/`exp` validation)
+# 2. Scale down the bridge (optional, stop it if not needed)
+oc scale deployment ecifm-sso-bridge --replicas=0 -n ecifm-sso-bridge
 
-**Solutions:**
-1. Verify the `MAS_OIDC_CLIENT_SECRET` in the OpenShift Secret matches what is configured in MAS Admin UI
-2. Verify Liberty can reach `https://ecifm-sso-bridge-ecifm-sso-bridge.apps.npos2.ecifmdev.net/oauth2/jwks` (network policy may block cross-namespace traffic)
-3. Check clock synchronization — ensure all pods use NTP
+# 3. Force CoreIDP pod restart to pick up the old config
+oc delete pod -n mas-inst1-core -l app.ibm.com/app=coreidp
 
-### 12.2 Infinite Redirect Loop
+# 4. Wait for CoreIDP to come back online
+oc wait --for=condition=ready pod -n mas-inst1-core -l app.ibm.com/app=coreidp --timeout=300s
+```
 
-**Symptoms:** Browser bounces between bridge and Entra ID without landing on TRIRIGA.
+---
 
-**Causes:**
-- `RequestCache` isn't properly restoring the original `/oauth2/authorize` request
-- Session cookies not being preserved across redirects
-- Liberty redirect URI doesn't match exactly
+## 15. Troubleshooting
 
-**Solutions:**
-1. Check bridge logs — look for `RequestCache` entries
-2. Verify the `MAS_OIDC_REDIRECT_URI` exactly matches what Liberty sends in the authorization request (including no trailing slash, exact scheme)
-3. Try clearing browser cookies and cache
+### 15.1 `CWPKI0823E: SSL handshake failed` / PKIX Path Validation Failed
 
-### 12.3 "No matching client" Error on Token Endpoint
-
-**Symptoms:** Liberty gets an error exchanging the authorization code for a token.
+**Symptom:** Liberty returns TLS errors when connecting to the bridge.
 
 **Causes:**
-- `mas-facilities` client is not registered in the bridge's `RegisteredClientRepository`
-- Client authentication method mismatch (bridge expects `client_secret_basic` or `client_secret_post`)
+- Missing or incorrect CA cert in IDPCfg `certificates`
+- Bridge route not presenting the full cert chain
+- Self-signed cert used (Java PKIX rejects self-signed certs even when added as trustedCertEntry)
 
 **Solutions:**
-1. Check bridge logs for "Registering OIDC client: mas-facilities with redirect URI: ..."
-2. Verify the `MAS_OIDC_CLIENT_ID` ConfigMap value is `mas-facilities`
-3. In MAS Admin UI, try changing "Token Endpoint Authentication Method" to `Client Secret Basic`
+1. Verify the bridge route presents the full chain (`bridge-tls-chain.crt`)
+2. Verify the CA cert in IDPCfg matches the CA that signed the bridge cert
+3. From a MAS pod, test TLS: `oc exec <pod> -- curl -v https://<bridge-hostname>`
+4. Check the truststore: `keytool -list -keystore /etc/mas/certs/truststore/truststore.jks`
 
-### 12.4 Token Has Wrong Claims / User Not Recognized
+### 15.2 `client_secret does not match`
 
-**Symptoms:** Liberty receives the token, but TRIRIGA doesn't create a session.
+**Symptom:** Token exchange fails at `/oauth2/token`.
 
-**Causes:**
-- `preferred_username` claim is missing or has wrong value
-- Liberty's "User Identifier (JWT)" field doesn't match the claim name
+**Cause:** The client secret in the bridge's `ecifm-bridge-secrets` doesn't match the one in `inst1-usersupplied-oidc-bridge-creds-system`.
 
-**Solutions:**
-1. Decode the ID token to inspect claims:
+**Solution:** Patch the bridge secret to match Liberty's:
 
-   ```powershell
-   # Get a sample ID token from bridge logs
-   oc logs -l app=ecifm-sso-bridge --tail=100 | findstr "Generated ID token"
-   ```
+```bash
+# Get the correct secret from Liberty's secret
+$LIBERTY_SECRET=$(oc get secret -n mas-inst1-core inst1-usersupplied-oidc-bridge-creds-system -o json | jq -r '.data.clientSecret' | base64 -d)
 
-2. Verify `preferred_username` is present and contains the user's email
-3. In MAS Admin UI, ensure "User Identifier (JWT)" is set to `preferred_username`
+# Encode it for the bridge secret
+$ENCODED=$(echo -n "$LIBERTY_SECRET" | base64 -w 0)
 
-### 12.5 New Pod Can't Validate Tokens from Old Pod
+# Patch the bridge secret
+oc patch secret -n ecifm-sso-bridge ecifm-bridge-secrets --type merge \
+  --patch "{\"data\":{\"MAS_OIDC_CLIENT_SECRET\":\"$ENCODED\"}}"
 
-**Symptoms:** After a rolling update, users get token validation errors.
+# Restart the bridge
+oc rollout restart deployment/ecifm-sso-bridge -n ecifm-sso-bridge
+```
 
-**Cause:** The bridge generates a new RSA key pair on each startup. Tokens signed by pod A cannot be validated by pod B.
+### 15.3 `redirect_uri` not registered
 
-**Solutions:**
-- **Short-term:** Run 1 replica (`replicas: 1`) until this is addressed
-- **Long-term:** Implement persistent JWK Set storage (see [Appendix C — Persistent JWK Set](#appendix-c--persistent-jwk-set))
+**Symptom:** Bridge returns HTTP 400 after Entra ID auth with redirect_uri error.
 
-### 12.6 Debug Logging
+**Cause:** The bridge's OAuth2 Authorization Server doesn't recognize the redirect URI that Liberty sends.
 
-The bridge has verbose logging enabled. To increase logging temporarily:
+**Solution:** The bridge needs both redirect URIs registered:
+1. TRIRIGA's callback: `https://<mas-domain>/oidcclient/redirect/facilities`
+2. Liberty's callback: `https://<liberty-op>/oidcclient/redirect/default-oidc`
 
-```powershell
-# Set logging level dynamically (if actuator is enabled)
+Set the `MAS_OAUTH_CLIENT_REDIRECT_URI` env var in the bridge ConfigMap for the second URI.
+
+### 15.4 Infinite Redirect Loop
+
+**Symptom:** Browser bounces between bridge and Entra ID without landing on TRIRIGA.
+
+**Cause:** Missing `authFilter` in IDPCfg. Without it, Liberty sends all unauthenticated requests to the bridge, and the bridge always redirects to Entra ID.
+
+**Solution:** Ensure `authFilter: "mas-oidc=oidc"` is set in the IDPCfg OIDC section.
+
+### 15.5 Ephemeral RSA Keys
+
+**Symptom:** After a rolling update, users who had active tokens get validation errors.
+
+**Cause:** The bridge generates a new RSA key pair on each startup.
+
+**Workaround:** Run 1 replica (`replicas: 1`).
+
+**Long-term fix:** Implement persistent JWK Set storage (see Appendix C).
+
+### 15.6 Debug Logging
+
+The bridge has verbose logging. To increase:
+
+```bash
 oc set env deployment/ecifm-sso-bridge LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_SECURITY=TRACE
-oc set env deployment/ecifm-sso-bridge LOGGING_LEVEL_COM_ECIFM_SAML_BRIDGE=DEBUG
-```
-
-Or check the logs in real-time:
-
-```powershell
-oc logs -l app=ecifm-sso-bridge -f
+oc logs -n ecifm-sso-bridge -l app=ecifm-sso-bridge -f
 ```
 
 ---
 
-## 13. Appendices
+## 16. Appendices
 
-### Appendix A — OpenShift CLI Commands
-
-If you prefer the CLI over the web console, here are all the commands:
+### Appendix A — OpenShift CLI Quick Reference
 
 ```bash
 # Login
-oc login --token=<token> --server=https://api.npos2.ecifmdev.net:6443
-oc project tririga
+oc login --token=<token> --server=https://api.<cluster>:6443
 
-# Apply ConfigMap
+# Switch project
+oc project ecifm-sso-bridge
+
+# Apply all resources
 oc apply -f openshift/configmap.yaml
-
-# Apply Secret (WARNING: this replaces the entire Secret!)
 oc apply -f openshift/secret.yaml
-
-# Apply Deployment
-oc apply -f openshift/deployment.yaml
-
-# Apply Service
 oc apply -f openshift/service.yaml
-
-# Apply Route
 oc apply -f openshift/route.yaml
+oc apply -f openshift/deployment.yaml
 
 # Restart
 oc rollout restart deployment/ecifm-sso-bridge
 
-# Watch
+# Watch rollout
 oc rollout status deployment/ecifm-sso-bridge -w
 
 # View logs
 oc logs -l app=ecifm-sso-bridge --tail=50
 
-# Scale (temporary)
+# Scale
 oc scale deployment/ecifm-sso-bridge --replicas=1
+
+# Exec into pod
+oc exec -it <pod-name> -- /bin/sh
+
+# Port forward (for local testing)
+oc port-forward deployment/ecifm-sso-bridge 8080:8080
 ```
 
-### Appendix B — Git Commits and Tags
+### Appendix B — Git Tags and Commits
 
-**Relevant tags:**
-- `v0.1.0-bridge-client-only` — The old code before the OIDC IdP changes (for reference/revert)
+| Tag | Description |
+|-----|-------------|
+| `v0.1.0-bridge-client-only` | Original bridge code (SAML client, no OIDC IdP) |
+| `v0.2.0-oidc-idp` | OIDC IdP implementation |
 
 **Changed files in v0.2.0:**
 
 ```
- M openshift/configmap.yaml
- M openshift/deployment.yaml
- M openshift/secret.yaml
- M pom.xml
-?? src/main/java/com/ecifm/saml/bridge/config/AuthServerConfig.java
- M src/main/java/com/ecifm/saml/bridge/config/SecurityConfig.java
- M src/main/java/com/ecifm/saml/bridge/EcifmSamlBridgeApplication.java
- M src/main/resources/application-openshift.yml
+M  openshift/configmap.yaml
+M  openshift/deployment.yaml
+M  openshift/secret.yaml
+M  openshift/route.yaml        (if route was modified)
+M  pom.xml
+A  src/main/java/com/ecifm/saml/bridge/config/AuthServerConfig.java
+M  src/main/java/com/ecifm/saml/bridge/config/SecurityConfig.java
+M  src/main/java/com/ecifm/saml/bridge/EcifmSamlBridgeApplication.java
+M  src/main/resources/application-openshift.yml
+A  docs/DEPLOYMENT.md
+A  docs/ROLLBACK.md
+A  docs/SESSION_HISTORY.md
+A  docs/resources/             (snapshots, certs, etc.)
 ```
 
 ### Appendix C — Persistent JWK Set
 
-**Current behavior:** The bridge generates a new RSA 2048-bit key pair at startup. This is a development-quality approach.
+**Current behavior:** The bridge generates a new RSA 2048-bit key pair at startup. Each pod restart = new keys.
 
 **Why this matters:** With 2+ replicas, each pod has a different key. If pod A signs a token and pod B receives the token request, Liberty's JWKS fetch may get pod B's key and fail to validate pod A's signature.
 
 **Recommended production approach:** Store the JWK Set in a file that persists across restarts (e.g., a PVC or ConfigMap):
 
-1. **Generate a JWK Set offline:**
-
+1. Generate a JWK Set offline:
    ```java
-   // Use Nimbus JOSE + Jackson to generate a JWK Set once
    RSAKey rsaKey = new RSAKeyGenerator(2048)
        .keyID("bridge-1")
        .algorithm(JWSAlgorithm.RS256)
        .generate();
    JWKSet jwkSet = new JWKSet(rsaKey);
    String json = jwkSet.toString();
-   System.out.println(json);
    ```
 
-2. **Store the JSON in a ConfigMap or Secret** named `ecifm-bridge-jwks`
-3. **Mount the file** in the pod at `/etc/jwks/jwks.json`
+2. Store the JSON in a ConfigMap or Secret named `ecifm-bridge-jwks`
 
-4. **Modify `AuthServerConfig.java`:**
+3. Mount the file in the pod at `/etc/jwks/jwks.json`
 
+4. Modify `AuthServerConfig.java` to load from file if present:
    ```java
    @Value("${bridge.jwks.file:}")
    private String jwksFilePath;
@@ -856,14 +1102,12 @@ oc scale deployment/ecifm-sso-bridge --replicas=1
    @Bean
    public JWKSource<SecurityContext> jwkSource() throws Exception {
        if (jwksFilePath != null && !jwksFilePath.isEmpty()) {
-           // Load from file
            try (var reader = new java.io.FileReader(jwksFilePath)) {
                JWKSet jwkSet = JWKSet.load(reader);
-               log.info("Loaded JWK Set from file: {}", jwksFilePath);
                return new ImmutableJWKSet<>(jwkSet);
            }
        }
-       // Fall back to generated key (as implemented now)
+       // Fall back to generated key
        ...
    }
    ```
@@ -872,13 +1116,11 @@ oc scale deployment/ecifm-sso-bridge --replicas=1
 
 This class configures the OIDC Authorization Server:
 
-- **`registeredClientRepository()`** — Registers `mas-facilities` as a trusted OIDC client with the redirect URI matching Liberty's callback. Uses `{noop}` prefix for the client secret (handled by `DelegatingPasswordEncoder`).
+- **`registeredClientRepository()`** — Registers `mas-facilities` as a trusted OIDC client with dual redirect URIs (TRIRIGA + Liberty). Uses `{noop}` prefix for the client secret (handled by `DelegatingPasswordEncoder`).
+
 - **`jwkSource()`** — Generates an RSA 2048-bit key pair and exposes it via JWKS endpoint (`/oauth2/jwks`). Liberty fetches this to validate ID token signatures.
-- **`tokenCustomizer()`** — Injects claims from the Entra ID `OidcUser` into the bridge's ID token. Maps:
-  - `sub` → Entra ID subject
-  - `preferred_username` → user email
-  - `email` → user email
-  - `name` → user display name
+
+- **`tokenCustomizer()`** — Injects claims from the Entra ID `OidcUser` into the bridge's ID token. Maps `sub`, `preferred_username`, `email`, `name`.
 
 ### Appendix E — Code Reference: `SecurityConfig.java`
 
@@ -887,33 +1129,28 @@ Three security filter chains:
 | Order | Matcher | Purpose | Auth mechanism |
 |-------|---------|---------|----------------|
 | `@Order(1)` | AS endpoints (`/oauth2/*`, `/.well-known/*`) | OIDC Authorization Server | Delegates to Entra ID via `LoginUrlAuthenticationEntryPoint` |
-| `@Order(2)` | `/local/**` | Local test endpoints | Permit all (no auth) |
+| `@Order(2)` | `/local/**` | Local test endpoints | Permit all |
 | `@Order(3)` | All other requests | OAuth2 client for Entra ID | `oauth2Login` → Entra ID |
-
-When an unauthenticated request hits an AS endpoint (e.g., `/oauth2/authorize`):
-1. `LoginUrlAuthenticationEntryPoint` returns a 302 redirect to `/oauth2/authorization/entra-id`
-2. The OAuth2 client chain handles this path and redirects to Entra ID
-3. After Entra ID authentication, the `AuthenticationSuccessHandler` (built into Spring Security's OAuth2 login) retrieves the original saved request from the `RequestCache` and redirects back to the AS endpoint
-4. This time, the request has an authenticated session, so the AS filter chain proceeds to generate the authorization code
 
 ### Appendix F — Environment Variables Reference
 
 | Variable | Required | Source | Purpose |
 |----------|----------|--------|---------|
-| `AZURE_CLIENT_ID` | Yes | ConfigMap | Entra ID app registration client ID |
-| `AZURE_CLIENT_SECRET` | Yes | Secret | Entra ID app registration secret |
+| `AZURE_CLIENT_ID` | Yes | ConfigMap | Entra ID app client ID |
+| `AZURE_CLIENT_SECRET` | Yes | Secret | Entra ID app client secret |
 | `JWT_ISSUER_URI` | Yes | ConfigMap | Entra ID v2.0 issuer URL |
 | `MAS_BASE_URL` | Yes | ConfigMap | TRIRIGA base URL |
-| `MAS_CONTEXT` | Yes | ConfigMap | TRIRIGA context path |
-| `MAS_REDIRECT_URL` | Yes | ConfigMap | TRIRIGA full app URL |
+| `MAS_CONTEXT` | Yes | ConfigMap | TRIRIGA context path (default: `/tririga`) |
+| `MAS_REDIRECT_URL` | Yes | ConfigMap | Post-login redirect URL |
 | `MAS_REST_API` | Yes | ConfigMap | SSOConnect REST path |
-| `TRIRIGA_USERNAME` | Yes | ConfigMap | Service account email |
+| `TRIRIGA_USERNAME` | Yes | ConfigMap | Service account email for SOAP calls |
 | `TRIRIGA_PASSWORD` | Yes | Secret | Service account password |
-| `BRIDGE_ISSUER_URL` | Yes (new) | ConfigMap | Bridge's own URL for OIDC issuer |
-| `MAS_OIDC_CLIENT_ID` | Yes (new) | ConfigMap | OIDC client ID for MAS |
-| `MAS_OIDC_CLIENT_SECRET` | Yes (new) | Secret | OIDC client secret shared with MAS |
-| `MAS_OIDC_REDIRECT_URI` | Yes (new) | ConfigMap | Liberty's OIDC callback URL |
-| `GRAPH_API_ENABLED` | No | ConfigMap | Enable/disable Graph API fallback |
+| `BRIDGE_ISSUER_URL` | Yes | ConfigMap | Bridge's OIDC issuer URL |
+| `MAS_OIDC_CLIENT_ID` | Yes | ConfigMap | OIDC client ID (default: `mas-facilities`) |
+| `MAS_OIDC_CLIENT_SECRET` | Yes | Secret | Shared secret with Liberty |
+| `MAS_OIDC_REDIRECT_URI` | Yes | ConfigMap | TRIRIGA's Liberty OIDC callback URL |
+| `MAS_OAUTH_CLIENT_REDIRECT_URI` | No | ConfigMap | Liberty's OP OIDC callback URL (second redirect URI) |
+| `GRAPH_API_ENABLED` | No | ConfigMap | Enable Graph API fallback (default: `true`) |
 | `SPRING_PROFILES_ACTIVE` | Yes | ConfigMap | Must be `openshift` |
 
 ---
