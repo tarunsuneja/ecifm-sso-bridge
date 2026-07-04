@@ -17,7 +17,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.CookieValue;
 
 @RestController
 @RequestMapping("/local")
@@ -102,8 +101,8 @@ public class LocalMockController {
             conn.setReadTimeout(15000);
             int code = conn.getResponseCode();
             result.append("HTTP ").append(code).append("\n");
-            String cookie = conn.getHeaderField("Set-Cookie");
-            if (cookie != null) result.append("Cookie: ").append(cookie).append("\n");
+            String setCookie = conn.getHeaderField("Set-Cookie");
+            if (setCookie != null) result.append("Cookie: ").append(setCookie).append("\n");
             StringBuilder body = new StringBuilder();
             try (BufferedReader br = new BufferedReader(
                     new InputStreamReader(code >= 400 ? conn.getErrorStream() : conn.getInputStream(),
