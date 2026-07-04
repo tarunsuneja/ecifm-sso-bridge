@@ -22,6 +22,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.ecifm.saml.bridge.service.TririgaWsClient;
+
 @RestController
 @RequestMapping("/local")
 public class LocalMockController {
@@ -32,9 +34,12 @@ public class LocalMockController {
     private String masBaseUrl;
 
     private final OAuth2AuthorizedClientService authorizedClientService;
+    private final TririgaWsClient tririgaWsClient;
 
-    public LocalMockController(OAuth2AuthorizedClientService authorizedClientService) {
+    public LocalMockController(OAuth2AuthorizedClientService authorizedClientService,
+            TririgaWsClient tririgaWsClient) {
         this.authorizedClientService = authorizedClientService;
+        this.tririgaWsClient = tririgaWsClient;
     }
 
     @GetMapping("/mock-sso")
@@ -102,6 +107,9 @@ public class LocalMockController {
             String ssoUrl = "https://main.facilities.inst1.apps.npos2.ecifmdev.net/html/en/default/rest/SSOConnect?userName=tarun.suneja@ecifm.com&adGroupName=ECIFM_TEST_GROUP";
             result.append("\n=== Test 6: Entra ID Bearer token (SSOConnect REST) ===\n");
             testCall(ssoUrl, "Bearer " + entraToken, null, result);
+
+            result.append("\n=== Test 7: Entra ID Bearer token (Business Connect SOAP) ===\n");
+            result.append(tririgaWsClient.getApplicationInfoWithBearer(entraToken)).append("\n");
         } else {
             result.append("\n=== Test 5: Entra ID Bearer token — SKIPPED (no active OAuth2 session) ===\n");
         }
