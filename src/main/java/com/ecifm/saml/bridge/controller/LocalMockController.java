@@ -33,6 +33,12 @@ public class LocalMockController {
     @Value("${mas.base-url}")
     private String masBaseUrl;
 
+    @Value("${tririga.username}")
+    private String tririgaUsername;
+
+    @Value("${tririga.password}")
+    private String tririgaPassword;
+
     private final OAuth2AuthorizedClientService authorizedClientService;
     private final TririgaWsClient tririgaWsClient;
 
@@ -113,6 +119,18 @@ public class LocalMockController {
         } else {
             result.append("\n=== Test 5: Entra ID Bearer token — SKIPPED (no active OAuth2 session) ===\n");
         }
+
+        String basicHeader = "Basic " + java.util.Base64.getEncoder().encodeToString((tririgaUsername + ":" + tririgaPassword).getBytes());
+
+        result.append("\n=== Test 8: Basic auth (OSLC) ===\n");
+        testCall(oslcUrl, basicHeader, null, result);
+
+        String ssoUrl = "https://main.facilities.inst1.apps.npos2.ecifmdev.net/html/en/default/rest/SSOConnect?userName=tarun.suneja@ecifm.com&adGroupName=ECIFM_TEST_GROUP";
+        result.append("\n=== Test 9: Basic auth (SSOConnect REST) ===\n");
+        testCall(ssoUrl, basicHeader, null, result);
+
+        result.append("\n=== Test 10: Basic auth (Business Connect SOAP) ===\n");
+        result.append(tririgaWsClient.getApplicationInfo()).append("\n");
 
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_PLAIN)
