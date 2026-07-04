@@ -11,6 +11,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
+import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -26,6 +30,12 @@ public class LocalMockController {
 
     @Value("${mas.base-url}")
     private String masBaseUrl;
+
+    private final OAuth2AuthorizedClientService authorizedClientService;
+
+    public LocalMockController(OAuth2AuthorizedClientService authorizedClientService) {
+        this.authorizedClientService = authorizedClientService;
+    }
 
     @GetMapping("/mock-sso")
     @ResponseBody
@@ -48,7 +58,8 @@ public class LocalMockController {
     public ResponseEntity<String> testOslc(
             @RequestHeader(value = "Authorization", required = false) String authHeader,
             @RequestParam(value = "jsessionid", required = false) String jsessionid,
-            @RequestParam(value = "cookie", required = false) String rawCookie) {
+            @RequestParam(value = "cookie", required = false) String rawCookie,
+            Authentication authentication) {
         String oslcUrl = "https://main.facilities.inst1.apps.npos2.ecifmdev.net/oslc/spq/triCurrentUserQC?oslc.select=*";
         log.info("Testing OSLC call to: {}", oslcUrl);
 
@@ -80,6 +91,15 @@ public class LocalMockController {
             testCall(oslcUrl, null, rawCookie, result);
         } else {
             result.append("\n=== Test 4: Raw Cookie — SKIPPED (pass ?cookie=<raw-cookie-value>) ===\n");
+        }
+
+        // Test 5: With Entra ID access token from current session
+        String entraToken = getEntraAccessToken(authentication);
+        if (entraToken != null) {
+            result.append("\n=== Test 5: Entra ID Bearer token (from session) ===\n");
+            testCall(oslcUrl, "Bearer " + entraToken, null, result);
+        } else {
+            result.append("\n=== Test 5: Entra ID Bearer token — SKIPPED (no active OAuth2 session) ===\n");
         }
 
         return ResponseEntity.ok()
@@ -114,6 +134,18 @@ public class LocalMockController {
         } catch (Exception e) {
             result.append("Error: ").append(e.getMessage()).append("\n");
         }
+    }
+
+    private String getEntraAccessToken(Authentication authentication) {
+        if (authentication instanceof OAuth2AuthenticationToken oauthToken
+                && "entra-id".equals(oauthToken.getAuthorizedClientRegistrationId())) {
+            OAuth2AuthorizedClient client = authorizedClientService.loadAuthorizedClient(
+                    "entra-id", oauthToken.getName());
+            if (client != null && client.getAccessToken() != null) {
+                return client.getAccessToken().getTokenValue();
+            }
+        }
+        return null;
     }
 
     @GetMapping("/mock-redirect")
