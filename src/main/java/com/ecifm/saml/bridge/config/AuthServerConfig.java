@@ -102,12 +102,14 @@ public class AuthServerConfig {
                         String email = oidcUser.getEmail();
                         String preferredUsername = oidcUser.getPreferredUsername();
                         String name = oidcUser.getFullName();
+                        String sub = email != null ? email : preferredUsername;
 
                         context.getClaims()
-                                .subject(oidcUser.getSubject())
+                                .subject(sub)
                                 .claim("preferred_username", preferredUsername != null ? preferredUsername : email)
                                 .claim("email", email != null ? email : "")
-                                .claim("name", name != null ? name : preferredUsername);
+                                .claim("name", name != null ? name : preferredUsername)
+                                .claim("uniqueSecurityName", sub);
                     }
                 }
             }
