@@ -24,6 +24,8 @@ import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.oidc.OidcScopes;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
+import org.springframework.security.oauth2.server.authorization.InMemoryOAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
 import org.springframework.security.oauth2.server.authorization.client.InMemoryRegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
@@ -93,25 +95,44 @@ public class AuthServerConfig {
     }
 
     @Bean
+    public OAuth2AuthorizationService authorizationService() {
+        return new InMemoryOAuth2AuthorizationService();
+    }
+
+    @Bean
     public OAuth2TokenCustomizer<JwtEncodingContext> tokenCustomizer() {
         return context -> {
             if ("id_token".equals(context.getTokenType().getValue())) {
                 var principal = context.getPrincipal();
+                String sub = null;
+                String preferredUsername = null;
+                String email = null;
+                String name = null;
+
                 if (principal instanceof org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken authToken) {
                     Object userObj = authToken.getPrincipal();
                     if (userObj instanceof OidcUser oidcUser) {
-                        String email = oidcUser.getEmail();
-                        String preferredUsername = oidcUser.getPreferredUsername();
-                        String name = oidcUser.getFullName();
-                        String sub = email != null ? email : preferredUsername;
-
-                        context.getClaims()
-                                .subject(sub)
-                                .claim("preferred_username", preferredUsername != null ? preferredUsername : email)
-                                .claim("email", email != null ? email : "")
-                                .claim("name", name != null ? name : preferredUsername)
-                                .claim("uniqueSecurityName", sub);
+                        email = oidcUser.getEmail();
+                        preferredUsername = oidcUser.getPreferredUsername();
+                        name = oidcUser.getFullName();
+                        sub = email != null ? email : preferredUsername;
                     }
+                }
+
+                if (sub == null && principal != null) {
+                    sub = principal.getName();
+                    if (email == null) email = sub;
+                    if (preferredUsername == null) preferredUsername = sub;
+                    if (name == null) name = sub;
+                }
+
+                if (sub != null) {
+                    context.getClaims()
+                            .subject(sub)
+                            .claim("preferred_username", preferredUsername != null ? preferredUsername : sub)
+                            .claim("email", email != null ? email : "")
+                            .claim("name", name != null ? name : sub)
+                            .claim("uniqueSecurityName", sub);
                 }
             }
         };
