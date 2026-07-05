@@ -14,14 +14,12 @@ import org.springframework.stereotype.Service;
 
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationField;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationRecord;
-import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationRows;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationSection1;
 import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationField;
 import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationRecord;
-import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationRows;
 import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationSection;
-import com.ecifm.saml.bridge.tririga.generated.dto.ObjectFactory;
 import com.ecifm.saml.bridge.tririga.generated.dto.QueryResult;
+import com.ecifm.saml.bridge.tririga.generated.dto.Record;
 import com.ecifm.saml.bridge.tririga.generated.dto.ResponseHelperHeader;
 
 @Service
@@ -56,17 +54,14 @@ public class MasGroupSyncService {
     @Value("${tririga.named-query.filter-data-type:1}")
     private int queryFilterDataType;
 
-    @Value("${tririga.people.project-name:}")
-    private String peopleProjectName;
+    @Value("${tririga.people.section-name:RecordInformation}")
+    private String peopleSectionName;
 
-    @Value("${tririga.people.module-name:}")
-    private String peopleModuleName;
+    @Value("${tririga.people.group-field-name:}")
+    private String peopleGroupFieldName;
 
-    @Value("${tririga.people.object-type-name:}")
-    private String peopleObjectTypeName;
-
-    @Value("${tririga.people.group-section-name:triPeopleTXGroup}")
-    private String peopleGroupSectionName;
+    @Value("${tririga.people.group-field-action:}")
+    private String peopleGroupFieldAction;
 
     public MasGroupSyncService(TririgaWsClient tririgaWsClient,
                                 EntraIdGroupResolver entraIdGroupResolver) {
@@ -140,54 +135,52 @@ public class MasGroupSyncService {
             }
 
             long recordId = Long.parseLong(recordIdStr);
-            int moduleId = tririgaWsClient.getModuleId(peopleModuleName);
-            long objectTypeId = tririgaWsClient.getObjectTypeId(peopleModuleName, peopleObjectTypeName);
 
-            if (moduleId < 0 || objectTypeId < 0) {
-                log.warn("Failed to resolve module/object type IDs for people record");
+            // Get record metadata from TRIRIGA (moduleId, guiId, objectTypeName)
+            Record guiRecord = tririgaWsClient.getRecordDataHeader(recordId);
+            if (guiRecord == null) {
+                log.warn("Could not retrieve record header for {}", email);
                 return false;
             }
 
-            ObjectFactory of = new ObjectFactory();
-
-            IntegrationRecord integrationRecord = new IntegrationRecord();
-            integrationRecord.setActionName("UPDATE");
-            integrationRecord.setId(recordId);
-            integrationRecord.setModuleId(moduleId);
-            integrationRecord.setObjectTypeId(objectTypeId);
-            integrationRecord.setObjectTypeName(peopleObjectTypeName);
-
-            IntegrationSection section = new IntegrationSection();
-            section.setName(peopleGroupSectionName);
-            section.setType(of.createIntegrationSectionType("M"));
-
-            ArrayOfIntegrationRows rows = new ArrayOfIntegrationRows();
-            List<IntegrationRows> rowList = rows.getIntegrationRows();
-
-            IntegrationRows deleteRows = new IntegrationRows();
-            deleteRows.setAction("Delete");
-            deleteRows.setRecordId(0L);
-            rowList.add(deleteRows);
-
+            // Build the group string (comma-separated list from Entra ID groups)
             List<String> groups = tririgaWsClient.extractColumnValues(queryResult, queryGroupColumnName);
-            for (String group : new HashSet<>(groups)) {
-                IntegrationRows addRow = new IntegrationRows();
-                addRow.setAction("Add");
-                ArrayOfIntegrationField fields = new ArrayOfIntegrationField();
-                IntegrationField field = new IntegrationField();
-                field.setName(peopleGroupSectionName);
-                field.setValue(group);
-                fields.getIntegrationField().add(field);
-                addRow.setFields(of.createIntegrationRowsFields(fields));
-                rowList.add(addRow);
+            String groupString = String.join(",", new HashSet<>(groups));
+
+            // Build IntegrationRecord following Business Connect pattern
+            IntegrationRecord integrationRecord = new IntegrationRecord();
+            integrationRecord.setId(recordId);
+            integrationRecord.setModuleId(guiRecord.getModuleId());
+            if (guiRecord.getObjectTypeName() != null) {
+                integrationRecord.setObjectTypeName(guiRecord.getObjectTypeName().getValue());
+            }
+            if (guiRecord.getGuiId() != null) {
+                integrationRecord.setGuiId(guiRecord.getGuiId());
             }
 
-            section.setRows(of.createIntegrationSectionRows(rows));
+            // Set the group field
+            IntegrationField groupField = new IntegrationField();
+            groupField.setName(peopleGroupFieldName);
+            groupField.setValue(groupString);
+
+            IntegrationSection section = new IntegrationSection();
+            section.setName(peopleSectionName);
+            ArrayOfIntegrationField fields = new ArrayOfIntegrationField();
+            fields.getIntegrationField().add(groupField);
+            com.ecifm.saml.bridge.tririga.generated.dto.ObjectFactory of =
+                new com.ecifm.saml.bridge.tririga.generated.dto.ObjectFactory();
+            section.setFields(of.createIntegrationSectionFields(fields));
 
             ArrayOfIntegrationSection1 sections = new ArrayOfIntegrationSection1();
             sections.getIntegrationSection().add(section);
             integrationRecord.setSections(sections);
 
+            // Optionally trigger a workflow action
+            if (peopleGroupFieldAction != null && !peopleGroupFieldAction.isEmpty()) {
+                integrationRecord.setActionName(peopleGroupFieldAction);
+            }
+
+            // Save via Business Connect
             ArrayOfIntegrationRecord records = new ArrayOfIntegrationRecord();
             records.getIntegrationRecord().add(integrationRecord);
 

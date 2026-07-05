@@ -47,10 +47,9 @@ tririga:
     filter-operator: ${MAS_NAMED_QUERY_FILTER_OPERATOR:0}
     filter-data-type: ${MAS_NAMED_QUERY_FILTER_DATA_TYPE:1}
   people:
-    project-name: ${MAS_PEOPLE_PROJECT:}
-    module-name: ${MAS_PEOPLE_MODULE:}
-    object-type-name: ${MAS_PEOPLE_OBJECT_TYPE:}
-    group-section-name: ${MAS_PEOPLE_GROUP_SECTION:triPeopleTXGroup}
+    section-name: ${MAS_PEOPLE_SECTION:RecordInformation}
+    group-field-name: ${MAS_PEOPLE_GROUP_FIELD:}
+    group-field-action: ${MAS_PEOPLE_GROUP_ACTION:}
 
 entra-id:
   graph:

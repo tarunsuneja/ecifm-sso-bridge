@@ -28,6 +28,7 @@ import org.springframework.stereotype.Component;
 import com.ecifm.saml.bridge.tririga.generated.dto.ApplicationInfo;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfFilter;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationRecord;
+import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfRecord;
 import com.ecifm.saml.bridge.tririga.generated.dto.Filter;
 import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationRecord;
 import com.ecifm.saml.bridge.tririga.generated.dto.QueryResult;
@@ -57,18 +58,6 @@ public class TririgaWsClient {
 
     @Value("${tririga.password}")
     private String tririgaPassword;
-
-    @Value("${tririga.people.project-name:}")
-    private String peopleProjectName;
-
-    @Value("${tririga.people.module-name:}")
-    private String peopleModuleName;
-
-    @Value("${tririga.people.object-type-name:}")
-    private String peopleObjectTypeName;
-
-    @Value("${tririga.people.group-section-name:triPeopleTXGroup}")
-    private String peopleGroupSectionName;
 
     public String getApplicationInfo() {
         return getApplicationInfo(null);
@@ -246,6 +235,27 @@ public class TririgaWsClient {
         } catch (Exception e) {
             log.error("getObjectTypeId('{}', '{}') failed: {}", moduleName, objectTypeName, e.getMessage(), e);
             return -1;
+        }
+    }
+
+    public com.ecifm.saml.bridge.tririga.generated.dto.Record getRecordDataHeader(long recordId) {
+        try {
+            TririgaWSPortType port = createPort();
+            com.ecifm.saml.bridge.tririga.generated.ws.ArrayOfLong ids = new com.ecifm.saml.bridge.tririga.generated.ws.ArrayOfLong();
+            ids.getLong().add(recordId);
+
+            ArrayOfRecord records = port.getRecordDataHeaders(ids);
+            if (records != null && records.getRecord() != null && !records.getRecord().isEmpty()) {
+                com.ecifm.saml.bridge.tririga.generated.dto.Record rec = records.getRecord().get(0);
+                log.info("getRecordDataHeader: id={}, name={}, moduleId={}, objectTypeName={}",
+                    rec.getId(), rec.getName(), rec.getModuleId(), rec.getObjectTypeName());
+                return rec;
+            }
+            log.warn("getRecordDataHeader returned empty for recordId={}", recordId);
+            return null;
+        } catch (Exception e) {
+            log.error("getRecordDataHeader failed for recordId={}: {}", recordId, e.getMessage(), e);
+            return null;
         }
     }
 
