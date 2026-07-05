@@ -887,6 +887,444 @@ Edge TLS is simpler (no pod TLS needed), which is why the bridge uses it. The MA
 
 ---
 
+---
+
+## 11. Greenfield Setup Guide — Configuring Bridge for a New Environment/Client
+
+This section walks through the complete process of deploying the bridge in a **new OpenShift cluster** or **new MAS instance** from scratch. It documents every manual step, every `oc` command, and every configuration decision.
+
+### 11.1 Prerequisites
+
+| Resource | Where to Get It | Example |
+|----------|----------------|---------|
+| OpenShift cluster 4.x+ | Client-provided | `api.npos2.ecifmdev.net:6443` |
+| OpenShift CLI (`oc`) logged in | `oc login` | Cluster admin or project admin |
+| MAS instance deployed (`inst1`) | MAS installation | Must have `mas-inst1-core`, `mas-inst1-facilities` namespaces |
+| Entra ID (Azure AD) tenant | Customer's Microsoft 365 | Tenant ID: `c99cc570-...` |
+| Entra ID App Registration | Customer's Azure Portal | Must have `client_id` + `client_secret` |
+| TRIRIGA admin credentials | Customer/TRIRIGA admin | Used for SOAP auth (temporary or permanent) |
+| DNS domain | Customer | `apps.npos2.ecifmdev.net` or similar |
+| Container registry access | `cp.icr.io` (IBM) or client's registry | For pulling base images |
+
+### 11.2 Step-by-Step Setup
+
+#### Step 1: Create the OpenShift Project
+
+```powershell
+# Create namespace for the bridge
+oc new-project ecifm-sso-bridge --display-name="eCIFM SSO Bridge"
+
+# Verify
+oc get projects | findstr ecifm-sso-bridge
+```
+
+#### Step 2: Gather Environment Values
+
+Run these commands against the target cluster to discover the values you need:
+
+```powershell
+# Find the TRIRIGA (facilities) route
+oc get routes -n <mas-facilities-namespace>
+# Example output:
+# main.facilities.inst1.apps.npos2.ecifmdev.net → inst1-main-appserver
+
+# Find the MAS Core IDP route
+oc get routes -n <mas-core-namespace>
+# Example output:
+# auth.inst1.apps.npos2.ecifmdev.net → coreidp
+
+# Find the TRIRIGA Liberty OIDC config
+oc get secret <sso-config-secret> -n <mas-facilities-namespace> -o yaml
+# Decode the oidc.xml to confirm the issuerIdentifier
+# You'll need this to understand what Liberty expects
+
+# Find the MAS Core IDP's OIDC provider config
+oc get configmap mas-multi-oidc -n <mas-core-namespace> -o yaml
+# This shows what OIDC providers are registered
+```
+
+**Values you need to collect:**
+
+| Variable | How to Find It | Your Value |
+|----------|---------------|------------|
+| `MAS_BASE_URL` | Route host for TRIRIGA Liberty | `https://main.facilities.inst1.apps.npos2.ecifmdev.net` |
+| `MAS_CONTEXT` | TRIRIGA context path (usually `/tririga`) | `/tririga` |
+| `MAS_REDIRECT_URL` | Full TRIRIGA URL users land on | `https://main.facilities.../app/tririga` |
+| `JWT_ISSUER_URI` | Entra ID tenant + `/v2.0` | `https://login.microsoftonline.com/<tenant-id>/v2.0` |
+| `BRIDGE_ISSUER_URL` | Bridge's own public URL | `https://ecifm-sso-bridge-<project>.<cluster-domain>` |
+| `MAS_OIDC_CLIENT_ID` | Must match Liberty's clientId (usually `mas-facilities`) | `mas-facilities` |
+| `MAS_OIDC_REDIRECT_URI` | Liberty's OIDC callback | `https://main.facilities.../oidcclient/redirect/facilities` |
+| `MAS_OAUTH_CLIENT_REDIRECT_URI` | Core IDP's OIDC callback | `https://auth.inst1.../oidcclient/redirect/default-oidc` |
+| `AZURE_CLIENT_ID` | From Entra ID App Registration | `cbcea157-...` |
+| `TRIRIGA_USERNAME` | TRIRIGA admin username | `admin@ecifm.com` |
+
+#### Step 3: Register Entra ID Application
+
+In the Azure Portal, create or configure an App Registration:
+
+1. **Navigation:** Azure Active Directory → App Registrations → New Registration
+2. **Name:** `ecifm-sso-bridge-<env>`
+3. **Redirect URI:** `https://<bridge-route-host>/login/oauth2/code/entra-id`
+   - Type: Web
+4. **API Permissions** (delegated):
+   - `Microsoft Graph / GroupMember.Read.All`
+   - `Microsoft Graph / User.Read`
+5. **Token Configuration:**
+   - `groupMembershipClaims: "SecurityGroup"`
+6. **Client Secret:** Create one and save it — you'll need it for `AZURE_CLIENT_SECRET`
+
+> **Why this app registration?** The bridge acts as both an OAuth2 client (of Entra ID) and an OAuth2 authorization server (for MAS Core IDP). The Entra ID app registration lets users authenticate with their Microsoft credentials through the bridge.
+
+#### Step 4: Generate OIDC Client Secret
+
+This secret is shared between the bridge and the MAS Core IDP:
+
+```powershell
+# Generate a cryptographically random 32-byte secret
+openssl rand -base64 32
+# Example output: fMkWmZx8qZ8d9R/f+40lWrZJlTCzpwprxGqoWxXURU4=
+```
+
+This becomes `MAS_OIDC_CLIENT_SECRET` in the bridge config and the `clientSecret` in the Core IDP's OIDC bridge credentials.
+
+#### Step 5: Configure the Bridge ConfigMap
+
+Create `openshift/configmap.yaml` with your values:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ecifm-bridge-config
+data:
+  MAS_BASE_URL: "https://main.facilities.<instance>.<cluster>"
+  MAS_CONTEXT: "/tririga"
+  MAS_REDIRECT_URL: "https://main.facilities.<instance>.<cluster>/app/tririga"
+  MAS_REST_API: "/html/en/default/rest/SSOConnect?userName={0}&adGroupName={1}"
+  JWT_ISSUER_URI: "https://login.microsoftonline.com/<tenant-id>/v2.0"
+  BRIDGE_ISSUER_URL: "https://ecifm-sso-bridge-<project>.<cluster-domain>"
+  MAS_OIDC_CLIENT_ID: "mas-facilities"
+  MAS_OIDC_REDIRECT_URI: "https://main.facilities.<instance>.<cluster>/oidcclient/redirect/facilities"
+  MAS_OAUTH_CLIENT_REDIRECT_URI: "https://auth.<instance>.<cluster>/oidcclient/redirect/default-oidc"
+  GRAPH_API_ENABLED: "true"
+  SPRING_PROFILES_ACTIVE: "openshift"
+  AZURE_CLIENT_ID: "<entra-id-client-id>"
+  TRIRIGA_USERNAME: "<tririga-admin-username>"
+```
+
+Apply it:
+
+```powershell
+oc apply -f openshift/configmap.yaml
+```
+
+#### Step 6: Configure the Bridge Secrets
+
+Create `openshift/secret.yaml`:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ecifm-bridge-secrets
+type: Opaque
+stringData:
+  AZURE_CLIENT_SECRET: "<from-azure-portal>"
+  TRIRIGA_PASSWORD: "<tririga-admin-password>"
+  MAS_OIDC_CLIENT_SECRET: "<generated-in-step-4>"
+```
+
+Apply it:
+
+```powershell
+oc apply -f openshift/secret.yaml
+```
+
+#### Step 7: Deploy the Bridge
+
+```powershell
+# Build and deploy from local source
+oc start-build ecifm-sso-bridge --from-dir=. --wait
+
+# Or apply the deployment manifest directly
+oc apply -f openshift/deployment.yaml
+oc apply -f openshift/service.yaml
+oc apply -f openshift/route.yaml
+
+# Wait for rollout
+oc rollout status deployment/ecifm-sso-bridge
+
+# Get the public URL
+oc get route ecifm-sso-bridge
+```
+
+#### Step 8: Verify the Bridge is Working
+
+```powershell
+# Health check
+curl -sk https://<bridge-host>/test
+# Expected: "ecifm-saml-bridge is running"
+
+# Check OIDC discovery endpoint
+curl -sk https://<bridge-host>/.well-known/openid-configuration
+# Expected: JSON with issuer, auth_endpoint, token_endpoint, jwks_uri
+
+# Check JWKS endpoint
+curl -sk https://<bridge-host>/oauth2/jwks
+# Expected: JSON with RSA public key(s)
+
+# Test SOAP auth (requires TRIRIGA credentials in secrets)
+curl -sk "https://<bridge-host>/local/test-liberty-session?email=<test-user>"
+# Expected: JSESSIONID + HTTP 200 with user profile
+```
+
+#### Step 9: Register the Bridge as an OIDC Provider in MAS Core IDP
+
+This is the most critical configuration step. The MAS Core IDP needs to know about the bridge as an upstream OIDC provider.
+
+**Option A: Via MAS Admin UI (recommended)**
+
+1. Visit `https://admin.<instance>.<cluster>`
+2. Navigate to **Identity Management → OIDC Providers**
+3. Click **Create OIDC Provider**
+4. Fill in:
+   - **Discovery URL:** `https://<bridge-host>/.well-known/openid-configuration`
+   - **Client ID:** `mas-facilities`
+   - **Client Secret:** (from Step 4)
+   - **User Identifier:** `preferred_username`
+   - **Config ID:** `default-oidc` (or any unique ID)
+5. Save
+
+**Option B: Via OpenShift ConfigMap (advanced)**
+
+Apply this ConfigMap:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mas-multi-oidc
+  namespace: <mas-core-namespace>
+  labels:
+    app.kubernetes.io/instance: <instance>
+    app.kubernetes.io/managed-by: ibm-mas-cfg-idp
+    app.kubernetes.io/name: ibm-mas
+    mas.ibm.com/instanceId: <instance>
+data:
+  <instance>-oidc-default-system.yaml: |
+    oidc:
+    - discoveryEndpointUrl: "https://<bridge-host>/.well-known/openid-configuration"
+      userIdentifier: "preferred_username"
+      tokenEndpointAuthMethod: "post"
+      tokenEndpointAuthSigningAlgorithm: "RS256"
+      signatureAlgorithm: "RS256"
+      credentials: "<instance>-usersupplied-oidc-bridge-creds-system"
+      configId: "default-oidc"
+```
+
+Then create the credentials secret:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: <instance>-usersupplied-oidc-bridge-creds-system
+  namespace: <mas-core-namespace>
+  labels:
+    mas.ibm.com/idpType: oidc
+    mas.ibm.com/instanceId: <instance>
+type: Opaque
+stringData:
+  clientId: "mas-facilities"
+  clientSecret: "<generated-in-step-4>"
+```
+
+> **Note:** After registering the OIDC provider, the mas-login SPA at `auth.<instance>.<cluster>/login/` will show a "Microsoft" or "Enterprise" button that triggers the bridge → Entra ID auth flow.
+
+#### Step 10: Configure SAML SP (Optional — for SAML IDP)
+
+If the MAS Core IDP also needs SAML as an identity source, create the SAML SP ConfigMap. This is typically used for admin users or backup authentication.
+
+This step is optional — the bridge provides OIDC-based authentication. SAML is needed only if you're also supporting SAML-based identity providers.
+
+#### Step 11: Update Liberty's OIDC Client (Optional — Direct Bridge Integration)
+
+By default, TRIRIGA Liberty's OIDC client (`facilities`) points to the MAS Core IDP (`auth.<instance>.../oidc/endpoint/MaximoAppSuite`). The authentication chain is:
+
+```
+User → TRIRIGA → Liberty OIDC → Core IDP → Bridge → Entra ID
+```
+
+If you want to **skip the Core IDP** and have Liberty talk to the bridge directly, you can update Liberty's OIDC client configuration:
+
+**WARNING:** This changes the authentication architecture significantly and will bypass the Core IDP's session management, LTPA cookie handling, and SAML support.
+
+To do this, update the `inst1-main-credentials-oauth-facilities-liberty` secret (or equivalent) with:
+
+```xml
+<openidConnectClient
+  clientId="mas-facilities"
+  clientSecret="<generated-in-step-4>"
+  id="facilities"
+  issuerIdentifier="https://<bridge-host>"
+  authorizationEndpointUrl="https://<bridge-host>/oauth2/authorize"
+  tokenEndpointUrl="https://<bridge-host>/oauth2/token"
+  jwkEndpointUrl="https://<bridge-host>/oauth2/jwks"
+  scope="openid"
+  signatureAlgorithm="RS256"
+  headerName="x-access-token"
+  includeIdTokenInSubject="true"
+  isClientSideRedirectSupported="false"
+  accessTokenInLtpaCookie="true"
+  mapIdentityToRegistryUser="false"
+/>
+```
+
+Then restart the Liberty pod:
+
+```powershell
+oc rollout restart statefulset/inst1-main-appserver -n <mas-facilities-namespace>
+```
+
+**This is NOT recommended unless you understand the implications.** The current architecture works through the Core IDP, which provides session management, audit logging, and other MAS infrastructure features.
+
+### 11.3 Configuration Cheat Sheet
+
+#### Environment Variables Summary
+
+| Env Var | Required | ConfigMap/Secret | Description |
+|---------|----------|-----------------|-------------|
+| `MAS_BASE_URL` | Yes | ConfigMap | TRIRIGA Liberty base URL |
+| `MAS_CONTEXT` | Yes | ConfigMap | TRIRIGA context path |
+| `MAS_REDIRECT_URL` | Yes | ConfigMap | Full TRIRIGA URL for user redirect |
+| `MAS_REST_API` | Yes | ConfigMap | SSOConnect REST API path |
+| `JWT_ISSUER_URI` | Yes | ConfigMap | Entra ID issuer URL |
+| `BRIDGE_ISSUER_URL` | Yes | ConfigMap | Bridge's own public URL |
+| `MAS_OIDC_CLIENT_ID` | Yes | ConfigMap | OIDC client ID for bridge |
+| `MAS_OIDC_REDIRECT_URI` | Yes | ConfigMap | Liberty's OIDC callback URL |
+| `MAS_OAUTH_CLIENT_REDIRECT_URI` | No | ConfigMap | Core IDP's OIDC callback URL |
+| `GRAPH_API_ENABLED` | No | ConfigMap | Enable MS Graph API group resolution |
+| `SPRING_PROFILES_ACTIVE` | Yes | ConfigMap | Must be "openshift" |
+| `AZURE_CLIENT_ID` | Yes | ConfigMap | Entra ID app client ID |
+| `TRIRIGA_USERNAME` | Yes | ConfigMap | TRIRIGA admin username |
+| `AZURE_CLIENT_SECRET` | Yes | **Secret** | Entra ID app client secret |
+| `TRIRIGA_PASSWORD` | Yes | **Secret** | TRIRIGA admin password |
+| `MAS_OIDC_CLIENT_SECRET` | Yes | **Secret** | OIDC client secret (shared with Core IDP) |
+
+#### Verification Checklist
+
+```powershell
+# 1. Bridge health
+curl -sk https://<bridge-host>/test
+# → "ecifm-saml-bridge is running"
+
+# 2. OIDC metadata
+curl -sk https://<bridge-host>/.well-known/openid-configuration | jq .issuer
+# → "https://ecifm-sso-bridge-<project>.<cluster>"
+
+# 3. JWKS
+curl -sk https://<bridge-host>/oauth2/jwks
+# → Contains "keys" array with RSA public key
+
+# 4. SOAP connection
+curl -sk "https://<bridge-host>/local/test-liberty-session?email=<user>"
+# → JSESSIONID + OSLC HTTP 200
+
+# 5. Full flow (requires browser)
+# Visit https://<bridge-host>/ in a browser
+# → Should redirect to Entra ID login
+# → After auth, should show status page with TRIRIGA link
+```
+
+#### Troubleshooting Commands
+
+```powershell
+# Check pod logs
+oc logs deployment/ecifm-sso-bridge --tail=50
+
+# Check OIDC config on Core IDP
+oc get configmap mas-multi-oidc -n <mas-core-namespace> -o yaml
+
+# Check Liberty OIDC config
+oc get secret <credentials-oauth-secret> -n <mas-facilities-namespace> -o yaml
+
+# Restart bridge
+oc rollout restart deployment/ecifm-sso-bridge
+
+# Scale up/down for debugging
+oc scale deployment/ecifm-sso-bridge --replicas=1
+
+# Port-forward for local testing
+oc port-forward deployment/ecifm-sso-bridge 8080:8080
+```
+
+### 11.4 Common Issues and Resolutions
+
+| Symptom | Likely Cause | Resolution |
+|---------|-------------|------------|
+| Bridge returns 404 on `/oauth2/authorize` | Spring Security filter chain not configured | Check `SecurityConfig.java` has `@Order(1)` for AS chain |
+| Liberty returns `CWOAU0073E` | id_token `sub` not mapping to TRIRIGA user | Check `tokenCustomizer` sets `sub` to user email and adds `uniqueSecurityName` claim |
+| mas-login SPA doesn't show Microsoft button | OIDC provider not registered in Core IDP | Check `mas-multi-oidc` ConfigMap exists and has correct bridge URL |
+| Bridge redirects to localhost after Entra ID auth | Missing `server.forward-headers-strategy: framework` | Ensure `application-openshift.yml` has this setting for Edge TLS |
+| TRIRIGA SOAP returns 302 (redirect to login) | HTTP Basic auth failed or credentials wrong | Verify `TRIRIGA_USERNAME` and `TRIRIGA_PASSWORD` in Secrets |
+| Core IDP returns 500 when using bridge OIDC | Client secret mismatch between bridge and Core IDP | Regenerate secret, update both sides |
+| `No redirect from TRIRIGA` in logs | TRIRIGA URL is not triggering OIDC redirect | Use `/login` path (not `/app/tririga`) if doing redirect simulation |
+| Bridge OIDC token rejected by Liberty | `iss` claim doesn't match Liberty's `issuerIdentifier` | This is expected — Liberty's issuer is Core IDP, not bridge. Flow must go through Core IDP. |
+
+### 11.5 Architecture Decision Record for New Environments
+
+When setting up for a new client, you have two architectural choices:
+
+**Choice A: Bridge as OIDC Provider for Core IDP (Recommended — current design)**
+
+```
+Flow: User → TRIRIGA → Liberty → Core IDP → Bridge → Entra ID
+Pros:
+  - Standard MAS architecture — Core IDP handles session management
+  - Core IDP provides SSO across all MAS apps (Facilities, Manage, etc.)
+  - LTPA cookies work across the MAS domain
+  - No TRIRIGA Liberty configuration changes needed
+Cons:
+  - Extra hop in the auth chain (Core IDP)
+  - Bridge OIDC tokens must match Core IDP expectations
+```
+
+**Choice B: Bridge as Direct OIDC Provider for Liberty (Simplified — not recommended)**
+
+```
+Flow: User → TRIRIGA → Liberty → Bridge → Entra ID
+Pros:
+  - One less hop in the auth chain
+  - Bridge has full control over token claims
+  - Simpler debugging
+Cons:
+  - Requires modifying Liberty's `openidConnectClient` configuration
+  - Breaks SSO across MAS apps (Manage won't share the session)
+  - Core IDP's session management is bypassed
+  - LTPA cookie domain may not work correctly
+```
+
+**Recommendation:** Use **Choice A** for all production deployments. Choice B is only suitable for isolated TRIRIGA-only environments where no other MAS applications are used.
+
+### 11.6 Environment Transition Checklist
+
+When moving between environments (dev → staging → production):
+
+```
+□ 1. Azure AD App Registration created per environment (dev/staging/prod get separate apps)
+□ 2. DNS entries created for bridge route
+□ 3. ConfigMap values updated for each environment
+□ 4. Secrets regenerated per environment (AZURE_CLIENT_SECRET, MAS_OIDC_CLIENT_SECRET)
+□ 5. TRIRIGA credentials created per environment
+□ 6. MAS Core IDP OIDC provider registered per environment
+□ 7. Network policies allow bridge ↔ Core IDP traffic
+□ 8. Routes created with correct TLS termination
+□ 9. Health probes verified in each environment
+□ 10. SSO test completed with test user
+```
+
+---
+
 ## Appendix A: TRIRIGA Liberty OIDC XML
 
 Decoded from the `inst1-main-credentials-oauth-facilities-liberty` secret:
