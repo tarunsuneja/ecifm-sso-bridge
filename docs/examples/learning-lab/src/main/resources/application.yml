@@ -1,0 +1,44 @@
+server:
+  port: 8080
+
+# ── Stage 1: Properties Demo ──
+app:
+  name: learning-lab
+  version: 1.0.0
+  admin-email: admin@example.com
+  features:
+    demo-mode: true
+    rate-limit: 100
+
+# ── Stage 3: OAuth2 AS config ──
+oauth2:
+  as:
+    issuer: http://localhost:8080
+
+# ── Stage 7: Entra ID config ──
+azure:
+  activedirectory:
+    tenant-id: your-tenant-id
+    client-id: your-client-id
+    client-secret: your-client-secret
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+app:
+  name: learning-lab (DEV)
+  features:
+    demo-mode: true
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+app:
+  name: learning-lab (PROD)
+  features:
+    demo-mode: false
+    rate-limit: 1000

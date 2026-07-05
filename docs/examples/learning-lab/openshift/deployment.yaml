@@ -1,0 +1,68 @@
+# ─────────────────────────────────────────────────────────────────
+# STAGE 4: OpenShift & Kubernetes
+# Exercise 1: Deployment + ConfigMap + Secret
+# ─────────────────────────────────────────────────────────────────
+#
+# A Deployment manages a set of identical pods.
+# Key fields:
+#   replicas: how many pod copies to run
+#   selector.matchLabels: which pods this deployment controls
+#   template: the pod template (what container to run)
+#   containers[].envFrom: inject ConfigMap/Secret as env vars
+#   containers[].resources: CPU/memory limits
+#   livenessProbe: if fails, pod is restarted
+#   readinessProbe: if fails, pod gets no traffic
+#
+# Apply:
+#   oc apply -f configmap.yaml
+#   oc apply -f secret.yaml
+#   oc apply -f deployment.yaml
+#   oc apply -f service.yaml
+#   oc apply -f route.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: learning-lab
+  labels:
+    app: learning-lab
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: learning-lab
+  template:
+    metadata:
+      labels:
+        app: learning-lab
+    spec:
+      containers:
+        - name: app
+          image: image-registry.openshift-image-registry.svc:5000/learning-lab/learning-lab:latest
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: learning-lab-config
+            - secretRef:
+                name: learning-lab-secret
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 5

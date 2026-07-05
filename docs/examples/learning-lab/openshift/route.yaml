@@ -1,0 +1,36 @@
+# ─────────────────────────────────────────────────────────────────
+# STAGE 4: OpenShift & Kubernetes
+# Exercise 5: Route (external HTTPS → internal Service)
+# ─────────────────────────────────────────────────────────────────
+#
+# A Route exposes a Service to the outside world via HTTPS.
+# OpenShift's Router (HAProxy) terminates TLS at the edge
+# and forwards plain HTTP to the pod.
+#
+# TLS termination types:
+#   edge:       Router decrypts, sends HTTP to pod (simplest)
+#   reencrypt:  Router decrypts, re-encrypts, sends HTTPS to pod
+#   passthrough: Router passes encrypted traffic through (SNI)
+#
+# Apply:
+#   oc apply -f route.yaml
+
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: learning-lab
+  labels:
+    app: learning-lab
+  annotations:
+    # Tell Spring to trust X-Forwarded-Proto header
+    haproxy.router.openshift.io/rewrite-target: /
+spec:
+  to:
+    kind: Service
+    name: learning-lab
+  port:
+    targetPort: http
+  tls:
+    termination: edge                    # Edge TLS (simplest)
+    insecureEdgeTerminationPolicy: Redirect  # HTTP → HTTPS redirect
+  wildcardPolicy: None

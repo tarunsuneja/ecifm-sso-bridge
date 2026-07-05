@@ -1,0 +1,29 @@
+# ─────────────────────────────────────────────────────────────────
+# STAGE 4: OpenShift & Kubernetes
+# Exercise 2: ConfigMap (non-sensitive config)
+# ─────────────────────────────────────────────────────────────────
+#
+# ConfigMaps hold non-sensitive key-value pairs.
+# They are injected into pods as env vars or mounted as files.
+# Updating a ConfigMap does NOT restart pods automatically.
+# Use "oc rollout restart deployment/X" after updating.
+#
+# Apply:
+#   oc apply -f configmap.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: learning-lab-config
+  labels:
+    app: learning-lab
+data:
+  # These become env vars: APP_NAME, APP_VERSION, FEATURES_DEMO_MODE
+  APP_NAME: "learning-lab"
+  APP_VERSION: "1.0.0"
+  FEATURES_DEMO_MODE: "true"
+  SPRING_PROFILES_ACTIVE: "openshift"
+  # Non-env data can also be stored
+  app.properties: |
+    admin.email=admin@example.com
+    rate.limit=100

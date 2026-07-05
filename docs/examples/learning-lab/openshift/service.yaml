@@ -1,0 +1,27 @@
+# ─────────────────────────────────────────────────────────────────
+# STAGE 4: OpenShift & Kubernetes
+# Exercise 4: Service (stable network endpoint)
+# ─────────────────────────────────────────────────────────────────
+#
+# A Service provides a stable ClusterIP + DNS name for pods.
+# Pods can come and go (restarts, scaling), but the service
+# IP stays the same. Requests are load-balanced across ready pods.
+#
+# Apply:
+#   oc apply -f service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: learning-lab
+  labels:
+    app: learning-lab
+spec:
+  selector:
+    app: learning-lab          # route traffic to pods with this label
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80                 # service port (inside the cluster)
+      targetPort: 8080         # pod port (the container's port)
+  type: ClusterIP              # only reachable inside the cluster
