@@ -63,6 +63,18 @@ public class MasGroupSyncService {
     @Value("${tririga.people.group-field-action:}")
     private String peopleGroupFieldAction;
 
+    @Value("${tririga.people.status-column-name:Status}")
+    private String statusColumnName;
+
+    @Value("${tririga.people.active-status-value:Active User}")
+    private String activeStatusValue;
+
+    @Value("${tririga.people.poll-max-retries:6}")
+    private int pollMaxRetries;
+
+    @Value("${tririga.people.poll-delay-ms:5000}")
+    private long pollDelayMs;
+
     public MasGroupSyncService(TririgaWsClient tririgaWsClient,
                                 EntraIdGroupResolver entraIdGroupResolver) {
         this.tririgaWsClient = tririgaWsClient;
@@ -188,6 +200,14 @@ public class MasGroupSyncService {
             if (response != null && !response.isAnyFailed()) {
                 log.info("saveRecord succeeded for {}: total={}, successful={}",
                     email, response.getTotal(), response.getSuccessful());
+
+                // Poll for workflow completion (e.g., Status = "Active User")
+                boolean active = pollForActiveStatus(email);
+                if (active) {
+                    log.info("User {} is now active after group sync", email);
+                } else {
+                    log.warn("User {} did not become active within retry limit", email);
+                }
                 return true;
             }
 
@@ -202,6 +222,38 @@ public class MasGroupSyncService {
             log.error("Failed to update groups for {} via Business Connect: {}", email, e.getMessage(), e);
             return false;
         }
+    }
+
+    /**
+     * Poll for workflow completion by re-running the named query
+     * and checking the status column for the active value.
+     */
+    private boolean pollForActiveStatus(String email) {
+        for (int attempt = 0; attempt < pollMaxRetries; attempt++) {
+            try {
+                Thread.sleep(pollDelayMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Interrupted while polling status for {}", email);
+                return false;
+            }
+
+            QueryResult result = queryTririgaGroups(email);
+            if (result == null) {
+                log.warn("Poll attempt {}: query returned null for {}", attempt + 1, email);
+                continue;
+            }
+
+            List<String> statuses = tririgaWsClient.extractColumnValues(result, statusColumnName);
+            String status = statuses.isEmpty() ? "" : statuses.get(0);
+            log.info("Poll attempt {} for {}: status='{}'", attempt + 1, email, status);
+
+            if (activeStatusValue.equalsIgnoreCase(status.trim())) {
+                return true;
+            }
+        }
+        log.warn("Max retries ({}) reached polling status for {}", pollMaxRetries, email);
+        return false;
     }
 
     private QueryResult queryTririgaGroups(String email) {

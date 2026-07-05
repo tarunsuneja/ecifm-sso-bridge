@@ -50,6 +50,10 @@ tririga:
     section-name: ${MAS_PEOPLE_SECTION:RecordInformation}
     group-field-name: ${MAS_PEOPLE_GROUP_FIELD:}
     group-field-action: ${MAS_PEOPLE_GROUP_ACTION:}
+    status-column-name: ${MAS_PEOPLE_STATUS_COLUMN:Status}
+    active-status-value: ${MAS_PEOPLE_ACTIVE_STATUS:Active User}
+    poll-max-retries: ${MAS_PEOPLE_POLL_RETRIES:6}
+    poll-delay-ms: ${MAS_PEOPLE_POLL_DELAY:5000}
 
 entra-id:
   graph:
