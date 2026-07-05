@@ -84,6 +84,23 @@ public class TririgaWsClient {
         }
     }
 
+    public String getApplicationInfoWithBearer(String token) {
+        try {
+            TririgaWSPortType port = createPortWithBearer(token);
+            ApplicationInfo info = port.getApplicationInfo();
+            log.info("getApplicationInfoWithBearer succeeded: version={}", info.getApiVersion());
+            return "Success:\n"
+                    + "  apiVersion: " + value(info.getApiVersion()) + "\n"
+                    + "  dbBuildNumber: " + value(info.getDbBuildNumber()) + "\n"
+                    + "  tririgaBuildNumber: " + value(info.getTririgaBuildNumber());
+        } catch (Exception e) {
+            StringWriter sw = new StringWriter();
+            e.printStackTrace(new PrintWriter(sw));
+            log.warn("getApplicationInfoWithBearer failed: {}\n{}", e.getMessage(), sw);
+            return "Failed: " + e.getMessage();
+        }
+    }
+
     public String getAuthenticatedSessionId() {
         try {
             TririgaWSPortType port = createPort();
@@ -110,6 +127,49 @@ public class TririgaWsClient {
             log.warn("getAuthenticatedSessionId failed: {}", e.getMessage());
             return null;
         }
+    }
+
+    private TririgaWSPortType createPortWithBearer(String bearerToken) throws Exception {
+        String ctx = masContext == null ? "" : masContext.trim().replaceAll("^/+|/+$", "");
+        String rawUrl = ctx.isEmpty() ? masBaseUrl + "/ws/TririgaWS" : masBaseUrl + "/" + ctx + "/ws/TririgaWS";
+        String endpoint = rawUrl.trim();
+        log.info("Creating CXF client (Bearer) for endpoint: {}", endpoint);
+
+        URL wsdlUrl = getClass().getResource(WSDL_RESOURCE);
+        TririgaWS service = new TririgaWS(wsdlUrl);
+        TririgaWSPortType port = service.getTririgaWSPort();
+
+        BindingProvider bp = (BindingProvider) port;
+        bp.getRequestContext().put(BindingProvider.ENDPOINT_ADDRESS_PROPERTY, endpoint);
+        bp.getRequestContext().put(BindingProvider.SESSION_MAINTAIN_PROPERTY, Boolean.TRUE);
+
+        Map<String, List<String>> headers = new HashMap<>();
+        headers.put("Authorization", List.of("Bearer " + bearerToken));
+        bp.getRequestContext().put(Message.PROTOCOL_HEADERS, headers);
+        log.info("Added Bearer token Authorization header");
+
+        Client client = ClientProxy.getClient(port);
+        HTTPConduit conduit = (HTTPConduit) client.getConduit();
+
+        HTTPClientPolicy policy = new HTTPClientPolicy();
+        policy.setConnectionTimeout(30_000);
+        policy.setReceiveTimeout(120_000);
+        policy.setAllowChunking(false);
+        conduit.setClient(policy);
+
+        TLSClientParameters tls = new TLSClientParameters();
+        tls.setDisableCNCheck(true);
+        tls.setTrustManagers(new TrustManager[]{
+            new X509TrustManager() {
+                public void checkClientTrusted(X509Certificate[] certs, String authType) {}
+                public void checkServerTrusted(X509Certificate[] certs, String authType) {}
+                public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+            }
+        });
+        conduit.setTlsClientParameters(tls);
+
+        log.info("CXF client (Bearer) configured");
+        return port;
     }
 
     private TririgaWSPortType createPort() throws Exception {

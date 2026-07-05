@@ -18,6 +18,9 @@ spring:
           entra-id:
             issuer-uri: ${JWT_ISSUER_URI}
             user-name-attribute: sub
+bridge:
+  issuer-url: ${BRIDGE_ISSUER_URL}
+
 mas:
   base-url: ${MAS_BASE_URL}
   context: ${MAS_CONTEXT:/tririga}
@@ -26,6 +29,7 @@ mas:
   oidc:
     client-id: ${MAS_OIDC_CLIENT_ID:mas-facilities}
     client-secret: ${MAS_OIDC_CLIENT_SECRET}
+    token-uri: ${MAS_OIDC_TOKEN_URI:}
     redirect-uri: ${MAS_OIDC_REDIRECT_URI:https://main.facilities.inst1.apps.npos2.ecifmdev.net/oidcclient/redirect/facilities}
   oauth:
     client-redirect-uri: ${MAS_OAUTH_CLIENT_REDIRECT_URI:}

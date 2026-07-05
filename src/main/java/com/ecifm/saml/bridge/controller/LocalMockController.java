@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.ecifm.saml.bridge.service.OidcTokenClient;
 import com.ecifm.saml.bridge.service.TririgaWsClient;
 
 @RestController
@@ -35,10 +36,18 @@ public class LocalMockController {
     @Value("${tririga.password}")
     private String tririgaPassword;
 
-    private final TririgaWsClient tririgaWsClient;
+    @Value("${bridge.issuer-url}")
+    private String bridgeIssuerUrl;
 
-    public LocalMockController(TririgaWsClient tririgaWsClient) {
+    @Value("${mas.oidc.client-id:mas-facilities}")
+    private String masOidcClientId;
+
+    private final TririgaWsClient tririgaWsClient;
+    private final OidcTokenClient oidcTokenClient;
+
+    public LocalMockController(TririgaWsClient tririgaWsClient, OidcTokenClient oidcTokenClient) {
         this.tririgaWsClient = tririgaWsClient;
+        this.oidcTokenClient = oidcTokenClient;
     }
 
     @GetMapping("/mock-sso")
@@ -82,6 +91,43 @@ public class LocalMockController {
         } else {
             result.append("No session available\n");
         }
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_PLAIN)
+                .body(result.toString());
+    }
+
+    @GetMapping("/test-oidc")
+    @ResponseBody
+    public ResponseEntity<String> testOidc() {
+        StringBuilder result = new StringBuilder();
+        String oslcUrl = "https://main.facilities.inst1.apps.npos2.ecifmdev.net/oslc/spq/triCurrentUserQC?oslc.select=*";
+
+        result.append("--- OIDC Client Credentials Config ---\n");
+        String derivedTokenUri = bridgeIssuerUrl + "/oauth2/token";
+        result.append("token-uri: ").append(derivedTokenUri).append(" (derived from bridge issuer)\n");
+        result.append("client-id: ").append(masOidcClientId).append("\n");
+
+        result.append("\n=== Step 1: Get client_credentials token ===\n");
+        String token = oidcTokenClient.getClientCredentialsToken();
+        if (token == null) {
+            result.append("Failed to obtain token\n");
+            return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(result.toString());
+        }
+        result.append("Token obtained (").append(token.length()).append(" chars)\n");
+
+        result.append("\n=== Step 2: OSLC with Bearer token ===\n");
+        testCall(oslcUrl, "Bearer " + token, null, result);
+
+        result.append("\n=== Step 3: SOAP with Bearer token ===\n");
+        result.append(tririgaWsClient.getApplicationInfoWithBearer(token)).append("\n");
+
+        result.append("\n=== Step 4: Get authenticated session via SOAP (HTTP Basic) ===\n");
+        String sessionId = tririgaWsClient.getAuthenticatedSessionId();
+        result.append("JSESSIONID: ").append(sessionId != null ? sessionId : "null").append("\n");
+
+        result.append("\n=== Step 5: OSLC with Bearer + authenticated session ===\n");
+        testCall(oslcUrl, "Bearer " + token, sessionId != null ? "JSESSIONID=" + sessionId : null, result);
 
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_PLAIN)
