@@ -60,7 +60,7 @@ public class MasGroupSyncService {
     @Value("${tririga.people.group-field-name:}")
     private String peopleGroupFieldName;
 
-    @Value("${tririga.people.group-field-action:}")
+    @Value("${tririga.people.group-field-action:cstValidateADGroup}")
     private String peopleGroupFieldAction;
 
     @Value("${tririga.people.status-column-name:Status}")
