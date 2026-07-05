@@ -27,10 +27,13 @@ import org.springframework.stereotype.Component;
 
 import com.ecifm.saml.bridge.tririga.generated.dto.ApplicationInfo;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfFilter;
+import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationRecord;
 import com.ecifm.saml.bridge.tririga.generated.dto.Filter;
+import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationRecord;
 import com.ecifm.saml.bridge.tririga.generated.dto.QueryResult;
 import com.ecifm.saml.bridge.tririga.generated.dto.QueryResponseColumn;
 import com.ecifm.saml.bridge.tririga.generated.dto.QueryResponseHelper;
+import com.ecifm.saml.bridge.tririga.generated.dto.ResponseHelperHeader;
 import com.ecifm.saml.bridge.tririga.generated.ws.TririgaWS;
 import com.ecifm.saml.bridge.tririga.generated.ws.TririgaWSPortType;
 
@@ -54,6 +57,18 @@ public class TririgaWsClient {
 
     @Value("${tririga.password}")
     private String tririgaPassword;
+
+    @Value("${tririga.people.project-name:}")
+    private String peopleProjectName;
+
+    @Value("${tririga.people.module-name:}")
+    private String peopleModuleName;
+
+    @Value("${tririga.people.object-type-name:}")
+    private String peopleObjectTypeName;
+
+    @Value("${tririga.people.group-section-name:triPeopleTXGroup}")
+    private String peopleGroupSectionName;
 
     public String getApplicationInfo() {
         return getApplicationInfo(null);
@@ -142,6 +157,20 @@ public class TririgaWsClient {
         }
     }
 
+    public String extractFirstRecordId(QueryResult result) {
+        if (result == null) return null;
+
+        var helpers = result.getQueryResponseHelpers();
+        if (helpers == null || helpers.getValue() == null) return null;
+
+        var list = helpers.getValue().getQueryResponseHelper();
+        if (list == null || list.isEmpty()) return null;
+
+        String recordId = value(list.get(0).getRecordId());
+        log.debug("extractFirstRecordId: {}", recordId);
+        return recordId;
+    }
+
     public List<String> extractColumnValues(QueryResult result, String columnName) {
         List<String> values = new java.util.ArrayList<>();
 
@@ -192,6 +221,43 @@ public class TririgaWsClient {
             return null;
         } catch (Exception e) {
             log.warn("getAuthenticatedSessionId failed: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    public int getModuleId(String moduleName) {
+        try {
+            TririgaWSPortType port = createPort();
+            int id = port.getModuleId(moduleName);
+            log.info("getModuleId('{}') = {}", moduleName, id);
+            return id;
+        } catch (Exception e) {
+            log.error("getModuleId('{}') failed: {}", moduleName, e.getMessage(), e);
+            return -1;
+        }
+    }
+
+    public long getObjectTypeId(String moduleName, String objectTypeName) {
+        try {
+            TririgaWSPortType port = createPort();
+            long id = port.getObjectTypeId(moduleName, objectTypeName);
+            log.info("getObjectTypeId('{}', '{}') = {}", moduleName, objectTypeName, id);
+            return id;
+        } catch (Exception e) {
+            log.error("getObjectTypeId('{}', '{}') failed: {}", moduleName, objectTypeName, e.getMessage(), e);
+            return -1;
+        }
+    }
+
+    public ResponseHelperHeader saveRecord(ArrayOfIntegrationRecord records) {
+        try {
+            TririgaWSPortType port = createPort();
+            ResponseHelperHeader result = port.saveRecord(records);
+            log.info("saveRecord: anyFailed={}, total={}, successful={}, failed={}",
+                result.isAnyFailed(), result.getTotal(), result.getSuccessful(), result.getFailed());
+            return result;
+        } catch (Exception e) {
+            log.error("saveRecord failed: {}", e.getMessage(), e);
             return null;
         }
     }

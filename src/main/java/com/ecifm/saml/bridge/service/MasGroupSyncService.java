@@ -12,7 +12,17 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationField;
+import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationRecord;
+import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationRows;
+import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationSection1;
+import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationField;
+import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationRecord;
+import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationRows;
+import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationSection;
+import com.ecifm.saml.bridge.tririga.generated.dto.ObjectFactory;
 import com.ecifm.saml.bridge.tririga.generated.dto.QueryResult;
+import com.ecifm.saml.bridge.tririga.generated.dto.ResponseHelperHeader;
 
 @Service
 public class MasGroupSyncService {
@@ -20,7 +30,6 @@ public class MasGroupSyncService {
     private static final Logger log = LoggerFactory.getLogger(MasGroupSyncService.class);
 
     private final TririgaWsClient tririgaWsClient;
-    private final MasApiClient masApiClient;
     private final EntraIdGroupResolver entraIdGroupResolver;
 
     @Value("${tririga.named-query.project-name:}")
@@ -47,11 +56,21 @@ public class MasGroupSyncService {
     @Value("${tririga.named-query.filter-data-type:1}")
     private int queryFilterDataType;
 
+    @Value("${tririga.people.project-name:}")
+    private String peopleProjectName;
+
+    @Value("${tririga.people.module-name:}")
+    private String peopleModuleName;
+
+    @Value("${tririga.people.object-type-name:}")
+    private String peopleObjectTypeName;
+
+    @Value("${tririga.people.group-section-name:triPeopleTXGroup}")
+    private String peopleGroupSectionName;
+
     public MasGroupSyncService(TririgaWsClient tririgaWsClient,
-                                MasApiClient masApiClient,
                                 EntraIdGroupResolver entraIdGroupResolver) {
         this.tririgaWsClient = tririgaWsClient;
-        this.masApiClient = masApiClient;
         this.entraIdGroupResolver = entraIdGroupResolver;
     }
 
@@ -75,22 +94,12 @@ public class MasGroupSyncService {
             .map(String::trim)
             .collect(Collectors.toSet());
 
-        // Check if named query is configured
-        if (!isNamedQueryConfigured()) {
-            log.info("Named query not configured, calling SSOConnect directly");
-            String groupString = String.join(",", entraGroupSet);
-            boolean ok = masApiClient.syncUserGroups(email, groupString);
-            return new SyncResult(ok, Collections.emptyList(), resolvedGroups, true);
-        }
-
         // Query TRIRIGA for current groups via named query
         List<String> tririgaGroups = queryTririgaGroups(email);
 
         if (tririgaGroups == null) {
-            log.warn("Failed to query TRIRIGA groups for {}, falling back to direct sync", email);
-            String groupString = String.join(",", entraGroupSet);
-            boolean ok = masApiClient.syncUserGroups(email, groupString);
-            return new SyncResult(ok, Collections.emptyList(), resolvedGroups, true);
+            log.warn("Failed to query TRIRIGA groups for {}, cannot sync", email);
+            return new SyncResult(false, Collections.emptyList(), resolvedGroups, false);
         }
 
         Set<String> tririgaGroupSet = new HashSet<>(tririgaGroups);
@@ -102,12 +111,11 @@ public class MasGroupSyncService {
             return new SyncResult(true, tririgaGroups, resolvedGroups, false);
         }
 
-        // Groups differ — call SSOConnect
+        // Groups differ — update via Business Connect saveRecord on People
         log.info("Groups differ for {}: TRIRIGA={}, Entra ID={}",
             email, tririgaGroupSet, entraGroupSet);
 
-        String groupString = String.join(",", entraGroupSet);
-        boolean ok = masApiClient.syncUserGroups(email, groupString);
+        boolean ok = updatePeopleGroups(email, tririgaGroups);
 
         if (ok) {
             log.info("Groups updated successfully for {}", email);
@@ -116,6 +124,95 @@ public class MasGroupSyncService {
         }
 
         return new SyncResult(ok, tririgaGroups, resolvedGroups, true);
+    }
+
+    private boolean updatePeopleGroups(String email, List<String> existingTririgaGroups) {
+        try {
+            QueryResult result = tririgaWsClient.runNamedQuery(
+                queryProjectName, queryModuleName, queryObjectTypeName, queryName,
+                queryFilterField, email, queryFilterOperator, queryFilterDataType,
+                0, 1);
+
+            if (result == null) {
+                log.warn("Cannot find people record for {}", email);
+                return false;
+            }
+
+            String recordIdStr = tririgaWsClient.extractFirstRecordId(result);
+            if (recordIdStr == null || recordIdStr.isEmpty()) {
+                log.warn("No record ID found for {}", email);
+                return false;
+            }
+
+            long recordId = Long.parseLong(recordIdStr);
+            int moduleId = tririgaWsClient.getModuleId(peopleModuleName);
+            long objectTypeId = tririgaWsClient.getObjectTypeId(peopleModuleName, peopleObjectTypeName);
+
+            if (moduleId < 0 || objectTypeId < 0) {
+                log.warn("Failed to resolve module/object type IDs for people record");
+                return false;
+            }
+
+            ObjectFactory of = new ObjectFactory();
+
+            IntegrationRecord integrationRecord = new IntegrationRecord();
+            integrationRecord.setActionName("UPDATE");
+            integrationRecord.setId(recordId);
+            integrationRecord.setModuleId(moduleId);
+            integrationRecord.setObjectTypeId(objectTypeId);
+            integrationRecord.setObjectTypeName(peopleObjectTypeName);
+
+            IntegrationSection section = new IntegrationSection();
+            section.setName(peopleGroupSectionName);
+            section.setType(of.createIntegrationSectionType("M"));
+
+            ArrayOfIntegrationRows rows = new ArrayOfIntegrationRows();
+            List<IntegrationRows> rowList = rows.getIntegrationRows();
+
+            IntegrationRows deleteRows = new IntegrationRows();
+            deleteRows.setAction("Delete");
+            deleteRows.setRecordId(0L);
+            rowList.add(deleteRows);
+
+            for (String group : new HashSet<>(existingTririgaGroups)) {
+                IntegrationRows addRow = new IntegrationRows();
+                addRow.setAction("Add");
+                ArrayOfIntegrationField fields = new ArrayOfIntegrationField();
+                IntegrationField field = new IntegrationField();
+                field.setName(peopleGroupSectionName);
+                field.setValue(group);
+                fields.getIntegrationField().add(field);
+                addRow.setFields(of.createIntegrationRowsFields(fields));
+                rowList.add(addRow);
+            }
+
+            section.setRows(of.createIntegrationSectionRows(rows));
+
+            ArrayOfIntegrationSection1 sections = new ArrayOfIntegrationSection1();
+            sections.getIntegrationSection().add(section);
+            integrationRecord.setSections(sections);
+
+            ArrayOfIntegrationRecord records = new ArrayOfIntegrationRecord();
+            records.getIntegrationRecord().add(integrationRecord);
+
+            ResponseHelperHeader response = tririgaWsClient.saveRecord(records);
+            if (response != null && !response.isAnyFailed()) {
+                log.info("saveRecord succeeded for {}: total={}, successful={}",
+                    email, response.getTotal(), response.getSuccessful());
+                return true;
+            }
+
+            log.warn("saveRecord reported failure for {}: anyFailed={}, total={}, successful={}, failed={}",
+                email, response != null ? response.isAnyFailed() : "null",
+                response != null ? response.getTotal() : -1,
+                response != null ? response.getSuccessful() : -1,
+                response != null ? response.getFailed() : -1);
+            return false;
+
+        } catch (Exception e) {
+            log.error("Failed to update groups for {} via Business Connect: {}", email, e.getMessage(), e);
+            return false;
+        }
     }
 
     private List<String> queryTririgaGroups(String email) {
@@ -138,10 +235,6 @@ public class MasGroupSyncService {
             log.error("Failed to query TRIRIGA groups for {}: {}", email, e.getMessage(), e);
             return null;
         }
-    }
-
-    private boolean isNamedQueryConfigured() {
-        return queryName != null && !queryName.isEmpty();
     }
 
     public static class SyncResult {
