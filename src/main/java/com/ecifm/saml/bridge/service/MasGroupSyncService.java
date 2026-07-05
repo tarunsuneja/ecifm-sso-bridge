@@ -95,11 +95,16 @@ public class MasGroupSyncService {
             .collect(Collectors.toSet());
 
         // Query TRIRIGA for current groups via named query
-        List<String> tririgaGroups = queryTririgaGroups(email);
+        QueryResult queryResult = queryTririgaGroups(email);
 
-        if (tririgaGroups == null) {
+        if (queryResult == null) {
             log.warn("Failed to query TRIRIGA groups for {}, cannot sync", email);
             return new SyncResult(false, Collections.emptyList(), resolvedGroups, false);
+        }
+
+        List<String> tririgaGroups = tririgaWsClient.extractColumnValues(queryResult, queryGroupColumnName);
+        if (tririgaGroups.isEmpty()) {
+            log.warn("No groups found in TRIRIGA for {}", email);
         }
 
         Set<String> tririgaGroupSet = new HashSet<>(tririgaGroups);
@@ -115,7 +120,7 @@ public class MasGroupSyncService {
         log.info("Groups differ for {}: TRIRIGA={}, Entra ID={}",
             email, tririgaGroupSet, entraGroupSet);
 
-        boolean ok = updatePeopleGroups(email, tririgaGroups);
+        boolean ok = updatePeopleGroups(email, queryResult);
 
         if (ok) {
             log.info("Groups updated successfully for {}", email);
@@ -126,19 +131,9 @@ public class MasGroupSyncService {
         return new SyncResult(ok, tririgaGroups, resolvedGroups, true);
     }
 
-    private boolean updatePeopleGroups(String email, List<String> existingTririgaGroups) {
+    private boolean updatePeopleGroups(String email, QueryResult queryResult) {
         try {
-            QueryResult result = tririgaWsClient.runNamedQuery(
-                queryProjectName, queryModuleName, queryObjectTypeName, queryName,
-                queryFilterField, email, queryFilterOperator, queryFilterDataType,
-                0, 1);
-
-            if (result == null) {
-                log.warn("Cannot find people record for {}", email);
-                return false;
-            }
-
-            String recordIdStr = tririgaWsClient.extractFirstRecordId(result);
+            String recordIdStr = tririgaWsClient.extractFirstRecordId(queryResult);
             if (recordIdStr == null || recordIdStr.isEmpty()) {
                 log.warn("No record ID found for {}", email);
                 return false;
@@ -174,7 +169,8 @@ public class MasGroupSyncService {
             deleteRows.setRecordId(0L);
             rowList.add(deleteRows);
 
-            for (String group : new HashSet<>(existingTririgaGroups)) {
+            List<String> groups = tririgaWsClient.extractColumnValues(queryResult, queryGroupColumnName);
+            for (String group : new HashSet<>(groups)) {
                 IntegrationRows addRow = new IntegrationRows();
                 addRow.setAction("Add");
                 ArrayOfIntegrationField fields = new ArrayOfIntegrationField();
@@ -215,7 +211,7 @@ public class MasGroupSyncService {
         }
     }
 
-    private List<String> queryTririgaGroups(String email) {
+    private QueryResult queryTririgaGroups(String email) {
         try {
             QueryResult result = tririgaWsClient.runNamedQuery(
                 queryProjectName, queryModuleName, queryObjectTypeName, queryName,
@@ -227,9 +223,9 @@ public class MasGroupSyncService {
                 return null;
             }
 
-            List<String> groups = tririgaWsClient.extractColumnValues(result, queryGroupColumnName);
-            log.info("Queried {} groups for {} from TRIRIGA: {}", groups.size(), email, groups);
-            return groups;
+            int total = result.getTotalResults() != null ? result.getTotalResults() : 0;
+            log.info("runNamedQuery returned {} total results for {}", total, email);
+            return result;
 
         } catch (Exception e) {
             log.error("Failed to query TRIRIGA groups for {}: {}", email, e.getMessage(), e);
