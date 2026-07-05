@@ -27,10 +27,12 @@ import org.springframework.security.oauth2.client.annotation.RegisteredOAuth2Aut
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 
 import com.ecifm.saml.bridge.service.MasGroupSyncService;
 import com.ecifm.saml.bridge.service.MasSyncService;
 import com.ecifm.saml.bridge.service.TririgaWsClient;
+import com.ecifm.saml.bridge.tririga.generated.dto.QueryResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -58,6 +60,39 @@ public class AcsHandlerController {
 
     @Value("${tririga.password}")
     private String tririgaPassword;
+
+    @Value("${tririga.named-query.project-name:}")
+    private String queryProjectName;
+
+    @Value("${tririga.named-query.module-name:}")
+    private String queryModuleName;
+
+    @Value("${tririga.named-query.object-type-name:}")
+    private String queryObjectTypeName;
+
+    @Value("${tririga.named-query.query-name:}")
+    private String queryName;
+
+    @Value("${tririga.named-query.filter-field:}")
+    private String queryFilterField;
+
+    @Value("${tririga.named-query.group-column-name:Group Name}")
+    private String queryGroupColumnName;
+
+    @Value("${tririga.named-query.filter-operator:0}")
+    private int queryFilterOperator;
+
+    @Value("${tririga.named-query.filter-data-type:1}")
+    private int queryFilterDataType;
+
+    @Value("${tririga.people.section-name:RecordInformation}")
+    private String peopleSectionName;
+
+    @Value("${tririga.people.group-field-name:}")
+    private String peopleGroupFieldName;
+
+    @Value("${tririga.people.group-field-action:cstValidateADGroup}")
+    private String peopleGroupFieldAction;
 
     public AcsHandlerController(MasSyncService masSyncService, MasGroupSyncService masGroupSyncService, TririgaWsClient tririgaWsClient, ObjectMapper objectMapper) {
         this.masSyncService = masSyncService;
@@ -305,6 +340,131 @@ public class AcsHandlerController {
         }
     }
 
+    @GetMapping("/local/test-jwt")
+    public ResponseEntity<String> localTestJwt(
+            @AuthenticationPrincipal OidcUser oidcUser,
+            @RegisteredOAuth2AuthorizedClient("entra-id") OAuth2AuthorizedClient authorizedClient) {
+        if (oidcUser == null || authorizedClient == null) {
+            return ResponseEntity.ok("Not authenticated. Visit /redirect first.");
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== OidcUser Claims ===\n");
+        oidcUser.getClaims().forEach((k, v) -> sb.append("  ").append(k).append(": ").append(v).append("\n"));
+        sb.append("\n=== Access Token Claims ===\n");
+        String accessToken = authorizedClient.getAccessToken().getTokenValue();
+        try {
+            String[] parts = accessToken.split("\\.");
+            String payload = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
+            JsonNode claims = objectMapper.readTree(payload);
+            sb.append(claims.toPrettyString()).append("\n");
+        } catch (Exception e) {
+            sb.append("Failed to decode: ").append(e.getMessage()).append("\n");
+        }
+        return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(sb.toString());
+    }
+
+    @GetMapping("/local/test-tririga-query")
+    public ResponseEntity<String> localTestTririgaQuery(@AuthenticationPrincipal OidcUser oidcUser,
+            @RequestParam(defaultValue = "") String email) {
+        if ((email == null || email.isEmpty()) && oidcUser != null) {
+            email = extractEmail(oidcUser);
+        }
+        if (email == null || email.isEmpty()) {
+            return ResponseEntity.badRequest().body("Provide ?email= param or authenticate first");
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== TRIRIGA Named Query Test ===\n");
+        sb.append("Email: ").append(email).append("\n");
+        sb.append("Query Config:\n");
+        sb.append("  project: ").append(nvl(queryProjectName)).append("\n");
+        sb.append("  module: ").append(nvl(queryModuleName)).append("\n");
+        sb.append("  objectType: ").append(nvl(queryObjectTypeName)).append("\n");
+        sb.append("  query: ").append(nvl(queryName)).append("\n");
+        sb.append("  filterField: ").append(nvl(queryFilterField)).append("\n");
+        sb.append("  groupColumn: ").append(nvl(queryGroupColumnName)).append("\n\n");
+
+        // Step 1: Run the named query
+        sb.append("--- Step 1: runNamedQuery ---\n");
+        QueryResult result = tririgaWsClient.runNamedQuery(
+            queryProjectName, queryModuleName, queryObjectTypeName, queryName,
+            queryFilterField, email, queryFilterOperator, queryFilterDataType, 0, 1000);
+        if (result == null) {
+            sb.append("FAILED: runNamedQuery returned null\n");
+            return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(sb.toString());
+        }
+        Integer total = result.getTotalResults();
+        sb.append("Total results: ").append(total != null ? total : 0).append("\n\n");
+
+        // Step 2: Dump each row
+        sb.append("--- Step 2: Row details ---\n");
+        var helpers = result.getQueryResponseHelpers();
+        int rowNum = 0;
+        if (helpers != null && helpers.getValue() != null) {
+            for (var helper : helpers.getValue().getQueryResponseHelper()) {
+                rowNum++;
+                sb.append("Row ").append(rowNum).append(": recordId=")
+                    .append(helper.getRecordId()).append("\n");
+                var columns = helper.getQueryResponseColumns();
+                if (columns != null && columns.getValue() != null) {
+                    for (var col : columns.getValue().getQueryResponseColumn()) {
+                        sb.append("  ").append(col.getName()).append(" = ")
+                            .append(col.getValue()).append("\n");
+                    }
+                }
+            }
+        }
+        sb.append("\n");
+
+        // Step 3: Test extractFirstRecordId
+        sb.append("--- Step 3: extractFirstRecordId ---\n");
+        String firstId = tririgaWsClient.extractFirstRecordId(result);
+        sb.append("First recordId: ").append(firstId != null ? firstId : "null").append("\n\n");
+
+        // Step 4: Test extractColumnValues (groups)
+        sb.append("--- Step 4: extractColumnValues (groupColumn='")
+            .append(nvl(queryGroupColumnName)).append("') ---\n");
+        List<String> groupValues = tririgaWsClient.extractColumnValues(result, queryGroupColumnName);
+        sb.append("Groups found: ").append(groupValues.size()).append("\n");
+        for (String g : groupValues) {
+            sb.append("  ").append(g).append("\n");
+        }
+        sb.append("\n");
+
+        // Step 5: Test getRecordDataHeader
+        sb.append("--- Step 5: getRecordDataHeader ---\n");
+        if (firstId != null) {
+            try {
+                long id = Long.parseLong(firstId);
+                var rec = tririgaWsClient.getRecordDataHeader(id);
+                if (rec != null) {
+                    sb.append("  id: ").append(rec.getId()).append("\n");
+                    sb.append("  name: ").append(rec.getName()).append("\n");
+                    sb.append("  moduleId: ").append(rec.getModuleId()).append("\n");
+                    sb.append("  objectTypeName: ").append(rec.getObjectTypeName()).append("\n");
+                    if (rec.getGuiId() != null) {
+                        sb.append("  guiId: ").append(rec.getGuiId()).append("\n");
+                    }
+                } else {
+                    sb.append("  FAILED: null response\n");
+                }
+            } catch (Exception e) {
+                sb.append("  FAILED: ").append(e.getMessage()).append("\n");
+            }
+        } else {
+            sb.append("  Skipped (no recordId)\n");
+        }
+        sb.append("\n");
+
+        // Step 6: Build what would be sent to saveRecord
+        sb.append("--- Step 6: Preview saveRecord payload ---\n");
+        sb.append("  sectionName: ").append(nvl(peopleSectionName)).append("\n");
+        sb.append("  groupFieldName: ").append(nvl(peopleGroupFieldName)).append("\n");
+        sb.append("  groupFieldAction: ").append(nvl(peopleGroupFieldAction)).append("\n");
+        sb.append("  groups: ").append(String.join(", ", groupValues)).append("\n");
+
+        return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(sb.toString());
+    }
+
     @GetMapping("/redirect")
     public ResponseEntity<String> ssoRedirect(
             @AuthenticationPrincipal OidcUser oidcUser,
@@ -462,6 +622,10 @@ public class AcsHandlerController {
             log.warn("Failed to extract groups from access token: {}", e.getMessage());
         }
         return List.of();
+    }
+
+    private static String nvl(String s) {
+        return s != null ? s : "";
     }
 
     private String escapeHtml(String input) {
