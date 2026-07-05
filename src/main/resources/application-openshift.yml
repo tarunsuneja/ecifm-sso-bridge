@@ -37,6 +37,15 @@ mas:
 tririga:
   username: ${TRIRIGA_USERNAME}
   password: ${TRIRIGA_PASSWORD}
+  named-query:
+    project-name: ${MAS_NAMED_QUERY_PROJECT:}
+    module-name: ${MAS_NAMED_QUERY_MODULE:}
+    object-type-name: ${MAS_NAMED_QUERY_OBJECT_TYPE:}
+    query-name: ${MAS_NAMED_QUERY_NAME:}
+    filter-field: ${MAS_NAMED_QUERY_FILTER_FIELD:}
+    group-column-name: ${MAS_NAMED_QUERY_GROUP_COLUMN:Group Name}
+    filter-operator: ${MAS_NAMED_QUERY_FILTER_OPERATOR:0}
+    filter-data-type: ${MAS_NAMED_QUERY_FILTER_DATA_TYPE:1}
 
 entra-id:
   graph:

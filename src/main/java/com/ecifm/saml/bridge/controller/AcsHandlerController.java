@@ -28,6 +28,7 @@ import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 
+import com.ecifm.saml.bridge.service.MasGroupSyncService;
 import com.ecifm.saml.bridge.service.MasSyncService;
 import com.ecifm.saml.bridge.service.TririgaWsClient;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -48,6 +49,7 @@ public class AcsHandlerController {
     private String masRedirectUrl;
 
     private final MasSyncService masSyncService;
+    private final MasGroupSyncService masGroupSyncService;
     private final TririgaWsClient tririgaWsClient;
     private final ObjectMapper objectMapper;
 
@@ -57,8 +59,9 @@ public class AcsHandlerController {
     @Value("${tririga.password}")
     private String tririgaPassword;
 
-    public AcsHandlerController(MasSyncService masSyncService, TririgaWsClient tririgaWsClient, ObjectMapper objectMapper) {
+    public AcsHandlerController(MasSyncService masSyncService, MasGroupSyncService masGroupSyncService, TririgaWsClient tririgaWsClient, ObjectMapper objectMapper) {
         this.masSyncService = masSyncService;
+        this.masGroupSyncService = masGroupSyncService;
         this.tririgaWsClient = tririgaWsClient;
         this.objectMapper = objectMapper;
     }
@@ -314,7 +317,25 @@ public class AcsHandlerController {
         }
 
         String email = extractEmail(oidcUser);
-        log.info("Authenticated user: {}, redirecting to MAS: {}", email, masRedirectUrl);
+        String accessToken = authorizedClient.getAccessToken().getTokenValue();
+
+        // Extract groups from JWT access token
+        List<String> jwtGroups = extractGroupsFromAccessToken(accessToken);
+        log.info("Groups from JWT for {}: {}", email, jwtGroups);
+
+        // Query TRIRIGA groups via named query, compare, and sync if different
+        MasGroupSyncService.SyncResult syncResult = masGroupSyncService.syncIfGroupsDiffer(
+                accessToken, email, jwtGroups);
+
+        if (syncResult.isSuccess()) {
+            if (syncResult.wasSynced()) {
+                log.info("Groups synced for {}: TRIRIGA groups updated to match Entra ID", email);
+            } else {
+                log.info("Groups match for {} — no sync needed", email);
+            }
+        } else {
+            log.warn("Group sync had issues for {}, proceeding with redirect", email);
+        }
 
         return ResponseEntity.status(HttpStatus.FOUND)
                 .header(HttpHeaders.LOCATION, masRedirectUrl)

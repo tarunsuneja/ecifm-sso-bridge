@@ -26,6 +26,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.ecifm.saml.bridge.tririga.generated.dto.ApplicationInfo;
+import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfFilter;
+import com.ecifm.saml.bridge.tririga.generated.dto.Filter;
+import com.ecifm.saml.bridge.tririga.generated.dto.QueryResult;
+import com.ecifm.saml.bridge.tririga.generated.dto.QueryResponseColumn;
+import com.ecifm.saml.bridge.tririga.generated.dto.QueryResponseHelper;
 import com.ecifm.saml.bridge.tririga.generated.ws.TririgaWS;
 import com.ecifm.saml.bridge.tririga.generated.ws.TririgaWSPortType;
 
@@ -99,6 +104,68 @@ public class TririgaWsClient {
             log.warn("getApplicationInfoWithBearer failed: {}\n{}", e.getMessage(), sw);
             return "Failed: " + e.getMessage();
         }
+    }
+
+    public QueryResult runNamedQuery(String projectName, String moduleName,
+                                       String objectTypeName, String queryName,
+                                       String filterField, String filterValue,
+                                       int filterOperator, int filterDataType,
+                                       int start, int maxResults) {
+        try {
+            TririgaWSPortType port = createPort();
+
+            ArrayOfFilter arrayOfFilter = null;
+            if (filterField != null && !filterField.isEmpty() && filterValue != null && !filterValue.isEmpty()) {
+                Filter filter = new Filter();
+                filter.setFieldName(filterField);
+                filter.setValue(filterValue);
+                filter.setOperator(filterOperator);
+                filter.setDataType(filterDataType);
+                filter.setSectionName("");
+
+                arrayOfFilter = new ArrayOfFilter();
+                arrayOfFilter.getFilter().add(filter);
+            }
+
+            QueryResult result = port.runNamedQuery(
+                projectName, moduleName, objectTypeName, queryName,
+                arrayOfFilter, start, maxResults);
+
+            Integer total = result.getTotalResults();
+            log.info("runNamedQuery '{}' returned {} total results", queryName,
+                total != null ? total : 0);
+            return result;
+
+        } catch (Exception e) {
+            log.error("runNamedQuery '{}' failed: {}", queryName, e.getMessage(), e);
+            return null;
+        }
+    }
+
+    public List<String> extractColumnValues(QueryResult result, String columnName) {
+        List<String> values = new java.util.ArrayList<>();
+
+        if (result == null) return values;
+
+        var helpers = result.getQueryResponseHelpers();
+        if (helpers == null || helpers.getValue() == null) return values;
+
+        for (QueryResponseHelper helper : helpers.getValue().getQueryResponseHelper()) {
+            var columns = helper.getQueryResponseColumns();
+            if (columns == null || columns.getValue() == null) continue;
+
+            for (QueryResponseColumn col : columns.getValue().getQueryResponseColumn()) {
+                String name = value(col.getName());
+                if (name.equals(columnName)) {
+                    String val = value(col.getValue());
+                    if (val != null && !val.isEmpty()) {
+                        values.add(val);
+                    }
+                }
+            }
+        }
+
+        return values;
     }
 
     public String getAuthenticatedSessionId() {
