@@ -29,6 +29,8 @@ import com.ecifm.saml.bridge.tririga.generated.dto.ApplicationInfo;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfFilter;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationRecord;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfRecord;
+import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfResponseHelper;
+import com.ecifm.saml.bridge.tririga.generated.dto.ResponseHelper;
 import com.ecifm.saml.bridge.tririga.generated.dto.Filter;
 import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationRecord;
 import com.ecifm.saml.bridge.tririga.generated.dto.QueryMultiBoResult;
@@ -266,6 +268,19 @@ public class TririgaWsClient {
             ResponseHelperHeader result = port.saveRecord(records);
             log.info("saveRecord: anyFailed={}, total={}, successful={}, failed={}",
                 result.isAnyFailed(), result.getTotal(), result.getSuccessful(), result.getFailed());
+            if (result.getResponseHelpers() != null) {
+                ArrayOfResponseHelper arr = result.getResponseHelpers().getValue();
+                if (arr != null && arr.getResponseHelper() != null) {
+                    for (ResponseHelper rh : arr.getResponseHelper()) {
+                        String status = rh.getStatus() != null ? rh.getStatus().getValue() : null;
+                        String val = rh.getValue() != null ? rh.getValue().getValue() : null;
+                        log.info("saveRecord responseHelper: key={}, name={}, recordId={}, status={}, value={}",
+                            rh.getKey() != null ? rh.getKey().getValue() : null,
+                            rh.getName() != null ? rh.getName().getValue() : null,
+                            rh.getRecordId(), status, val);
+                    }
+                }
+            }
             return result;
         } catch (Exception e) {
             log.error("saveRecord failed: {}", e.getMessage(), e);
