@@ -186,10 +186,12 @@ public class MasGroupSyncService {
             sections.getIntegrationSection().add(section);
             integrationRecord.setSections(sections);
 
-            // Optionally trigger a workflow action
-            if (peopleGroupFieldAction != null && !peopleGroupFieldAction.isEmpty()) {
-                integrationRecord.setActionName(peopleGroupFieldAction);
-            }
+            // NOTE: Not setting actionName — MAS Core denies transitions on managed records.
+            // The field value is saved directly; the reference project's workflow (cstValidateADGroup)
+            // is not compatible with MAS Core managed triPeople records.
+            //if (peopleGroupFieldAction != null && !peopleGroupFieldAction.isEmpty()) {
+            //    integrationRecord.setActionName(peopleGroupFieldAction);
+            //}
 
             // Save via Business Connect
             ArrayOfIntegrationRecord records = new ArrayOfIntegrationRecord();
@@ -200,13 +202,7 @@ public class MasGroupSyncService {
                 log.info("saveRecord succeeded for {}: total={}, successful={}",
                     email, response.getTotal(), response.getSuccessful());
 
-                // Poll for workflow completion (e.g., Status = "Active User")
-                boolean active = pollForActiveStatus(email);
-                if (active) {
-                    log.info("User {} is now active after group sync", email);
-                } else {
-                    log.warn("User {} did not become active within retry limit", email);
-                }
+                pollForActiveStatus(email);
                 return true;
             }
 
