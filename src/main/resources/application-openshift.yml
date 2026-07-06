@@ -44,8 +44,8 @@ tririga:
     query-name: ${MAS_NAMED_QUERY_NAME:}
     filter-field: ${MAS_NAMED_QUERY_FILTER_FIELD:}
     group-column-name: ${MAS_NAMED_QUERY_GROUP_COLUMN:Group Name}
-    filter-operator: ${MAS_NAMED_QUERY_FILTER_OPERATOR:0}
-    filter-data-type: ${MAS_NAMED_QUERY_FILTER_DATA_TYPE:1}
+    filter-operator: ${MAS_NAMED_QUERY_FILTER_OPERATOR:10}
+    filter-data-type: ${MAS_NAMED_QUERY_FILTER_DATA_TYPE:320}
   people:
     section-name: ${MAS_PEOPLE_SECTION:RecordInformation}
     group-field-name: ${MAS_PEOPLE_GROUP_FIELD:}

@@ -79,10 +79,10 @@ public class AcsHandlerController {
     @Value("${tririga.named-query.group-column-name:Group Name}")
     private String queryGroupColumnName;
 
-    @Value("${tririga.named-query.filter-operator:0}")
+    @Value("${tririga.named-query.filter-operator:10}")
     private int queryFilterOperator;
 
-    @Value("${tririga.named-query.filter-data-type:1}")
+    @Value("${tririga.named-query.filter-data-type:320}")
     private int queryFilterDataType;
 
     @Value("${tririga.people.section-name:RecordInformation}")
