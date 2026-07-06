@@ -18,7 +18,7 @@ import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationSection1;
 import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationField;
 import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationRecord;
 import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationSection;
-import com.ecifm.saml.bridge.tririga.generated.dto.QueryResult;
+import com.ecifm.saml.bridge.tririga.generated.dto.QueryMultiBoResult;
 import com.ecifm.saml.bridge.tririga.generated.dto.Record;
 import com.ecifm.saml.bridge.tririga.generated.dto.ResponseHelperHeader;
 
@@ -102,14 +102,14 @@ public class MasGroupSyncService {
             .collect(Collectors.toSet());
 
         // Query TRIRIGA for current groups via named query
-        QueryResult queryResult = queryTririgaGroups(email);
+        QueryMultiBoResult queryResult = queryTririgaGroups(email);
 
         if (queryResult == null) {
             log.warn("Failed to query TRIRIGA groups for {}, cannot sync", email);
             return new SyncResult(false, Collections.emptyList(), resolvedGroups, false);
         }
 
-        List<String> tririgaGroups = tririgaWsClient.extractColumnValues(queryResult, queryGroupColumnName);
+        List<String> tririgaGroups = tririgaWsClient.extractColumnValuesFromMultiBo(queryResult, queryGroupColumnName);
         if (tririgaGroups.isEmpty()) {
             log.warn("No groups found in TRIRIGA for {}", email);
         }
@@ -138,9 +138,9 @@ public class MasGroupSyncService {
         return new SyncResult(ok, tririgaGroups, resolvedGroups, true);
     }
 
-    private boolean updatePeopleGroups(String email, QueryResult queryResult) {
+    private boolean updatePeopleGroups(String email, QueryMultiBoResult queryResult) {
         try {
-            String recordIdStr = tririgaWsClient.extractFirstRecordId(queryResult);
+            String recordIdStr = tririgaWsClient.extractFirstRecordIdFromMultiBo(queryResult);
             if (recordIdStr == null || recordIdStr.isEmpty()) {
                 log.warn("No record ID found for {}", email);
                 return false;
@@ -156,7 +156,7 @@ public class MasGroupSyncService {
             }
 
             // Build the group string (comma-separated list from Entra ID groups)
-            List<String> groups = tririgaWsClient.extractColumnValues(queryResult, queryGroupColumnName);
+            List<String> groups = tririgaWsClient.extractColumnValuesFromMultiBo(queryResult, queryGroupColumnName);
             String groupString = String.join(",", new HashSet<>(groups));
 
             // Build IntegrationRecord following Business Connect pattern
@@ -238,13 +238,13 @@ public class MasGroupSyncService {
                 return false;
             }
 
-            QueryResult result = queryTririgaGroups(email);
+            QueryMultiBoResult result = queryTririgaGroups(email);
             if (result == null) {
                 log.warn("Poll attempt {}: query returned null for {}", attempt + 1, email);
                 continue;
             }
 
-            List<String> statuses = tririgaWsClient.extractColumnValues(result, statusColumnName);
+            List<String> statuses = tririgaWsClient.extractColumnValuesFromMultiBo(result, statusColumnName);
             String status = statuses.isEmpty() ? "" : statuses.get(0);
             log.info("Poll attempt {} for {}: status='{}'", attempt + 1, email, status);
 
@@ -256,20 +256,20 @@ public class MasGroupSyncService {
         return false;
     }
 
-    private QueryResult queryTririgaGroups(String email) {
+    private QueryMultiBoResult queryTririgaGroups(String email) {
         try {
-            QueryResult result = tririgaWsClient.runNamedQuery(
+            QueryMultiBoResult result = tririgaWsClient.runNamedQueryMultiBo(
                 queryProjectName, queryModuleName, queryObjectTypeName, queryName,
                 queryFilterField, email, queryFilterOperator, queryFilterDataType,
                 0, 1000);
 
             if (result == null) {
-                log.warn("runNamedQuery returned null for {}", email);
+                log.warn("runNamedQueryMultiBo returned null for {}", email);
                 return null;
             }
 
             int total = result.getTotalResults() != null ? result.getTotalResults() : 0;
-            log.info("runNamedQuery returned {} total results for {}", total, email);
+            log.info("runNamedQueryMultiBo returned {} total results for {}", total, email);
             return result;
 
         } catch (Exception e) {

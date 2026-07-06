@@ -32,7 +32,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import com.ecifm.saml.bridge.service.MasGroupSyncService;
 import com.ecifm.saml.bridge.service.MasSyncService;
 import com.ecifm.saml.bridge.service.TririgaWsClient;
-import com.ecifm.saml.bridge.tririga.generated.dto.QueryResult;
+import com.ecifm.saml.bridge.tririga.generated.dto.QueryMultiBoResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -383,13 +383,13 @@ public class AcsHandlerController {
         sb.append("  filterField: ").append(nvl(queryFilterField)).append("\n");
         sb.append("  groupColumn: ").append(nvl(queryGroupColumnName)).append("\n\n");
 
-        // Step 1: Run the named query
-        sb.append("--- Step 1: runNamedQuery ---\n");
-        QueryResult result = tririgaWsClient.runNamedQuery(
+        // Step 1: Run the named query (multi-bo)
+        sb.append("--- Step 1: runNamedQueryMultiBo ---\n");
+        QueryMultiBoResult result = tririgaWsClient.runNamedQueryMultiBo(
             queryProjectName, queryModuleName, queryObjectTypeName, queryName,
             queryFilterField, email, queryFilterOperator, queryFilterDataType, 0, 1000);
         if (result == null) {
-            sb.append("FAILED: runNamedQuery returned null\n");
+            sb.append("FAILED: runNamedQueryMultiBo returned null\n");
             return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(sb.toString());
         }
         Integer total = result.getTotalResults();
@@ -397,16 +397,16 @@ public class AcsHandlerController {
 
         // Step 2: Dump each row
         sb.append("--- Step 2: Row details ---\n");
-        var helpers = result.getQueryResponseHelpers();
+        var helpers = result.getQueryMultiBoResponseHelpers();
         int rowNum = 0;
         if (helpers != null && helpers.getValue() != null) {
-            for (var helper : helpers.getValue().getQueryResponseHelper()) {
+            for (var helper : helpers.getValue().getQueryMultiBoResponseHelper()) {
                 rowNum++;
                 sb.append("Row ").append(rowNum).append(": recordId=")
                     .append(helper.getRecordId()).append("\n");
-                var columns = helper.getQueryResponseColumns();
+                var columns = helper.getQueryMultiBoResponseColumns();
                 if (columns != null && columns.getValue() != null) {
-                    for (var col : columns.getValue().getQueryResponseColumn()) {
+                    for (var col : columns.getValue().getQueryMultiBoResponseColumn()) {
                         sb.append("  ").append(col.getName()).append(" = ")
                             .append(col.getValue()).append("\n");
                     }
@@ -415,15 +415,15 @@ public class AcsHandlerController {
         }
         sb.append("\n");
 
-        // Step 3: Test extractFirstRecordId
-        sb.append("--- Step 3: extractFirstRecordId ---\n");
-        String firstId = tririgaWsClient.extractFirstRecordId(result);
+        // Step 3: Test extractFirstRecordIdFromMultiBo
+        sb.append("--- Step 3: extractFirstRecordIdFromMultiBo ---\n");
+        String firstId = tririgaWsClient.extractFirstRecordIdFromMultiBo(result);
         sb.append("First recordId: ").append(firstId != null ? firstId : "null").append("\n\n");
 
-        // Step 4: Test extractColumnValues (groups)
-        sb.append("--- Step 4: extractColumnValues (groupColumn='")
+        // Step 4: Test extractColumnValuesFromMultiBo (groups)
+        sb.append("--- Step 4: extractColumnValuesFromMultiBo (groupColumn='")
             .append(nvl(queryGroupColumnName)).append("') ---\n");
-        List<String> groupValues = tririgaWsClient.extractColumnValues(result, queryGroupColumnName);
+        List<String> groupValues = tririgaWsClient.extractColumnValuesFromMultiBo(result, queryGroupColumnName);
         sb.append("Groups found: ").append(groupValues.size()).append("\n");
         for (String g : groupValues) {
             sb.append("  ").append(g).append("\n");

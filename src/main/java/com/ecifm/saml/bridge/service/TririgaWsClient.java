@@ -31,6 +31,7 @@ import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationRecord;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfRecord;
 import com.ecifm.saml.bridge.tririga.generated.dto.Filter;
 import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationRecord;
+import com.ecifm.saml.bridge.tririga.generated.dto.QueryMultiBoResult;
 import com.ecifm.saml.bridge.tririga.generated.dto.QueryResult;
 import com.ecifm.saml.bridge.tririga.generated.dto.QueryResponseColumn;
 import com.ecifm.saml.bridge.tririga.generated.dto.QueryResponseHelper;
@@ -270,6 +271,82 @@ public class TririgaWsClient {
             log.error("saveRecord failed: {}", e.getMessage(), e);
             return null;
         }
+    }
+
+    public QueryMultiBoResult runNamedQueryMultiBo(String projectName, String moduleName,
+                                                     String objectTypeName, String queryName,
+                                                     String filterField, String filterValue,
+                                                     int filterOperator, int filterDataType,
+                                                     int start, int maxResults) {
+        try {
+            TririgaWSPortType port = createPort();
+
+            ArrayOfFilter arrayOfFilter = null;
+            if (filterField != null && !filterField.isEmpty() && filterValue != null && !filterValue.isEmpty()) {
+                Filter filter = new Filter();
+                filter.setFieldName(filterField);
+                filter.setValue(filterValue);
+                filter.setOperator(filterOperator);
+                filter.setDataType(filterDataType);
+                filter.setSectionName("");
+
+                arrayOfFilter = new ArrayOfFilter();
+                arrayOfFilter.getFilter().add(filter);
+            }
+
+            QueryMultiBoResult result = port.runNamedQueryMultiBo(
+                projectName, moduleName, objectTypeName, queryName,
+                arrayOfFilter, start, maxResults);
+
+            Integer total = result.getTotalResults();
+            log.info("runNamedQueryMultiBo '{}' returned {} total results", queryName,
+                total != null ? total : 0);
+            return result;
+
+        } catch (Exception e) {
+            log.error("runNamedQueryMultiBo '{}' failed: {}", queryName, e.getMessage(), e);
+            return null;
+        }
+    }
+
+    public String extractFirstRecordIdFromMultiBo(QueryMultiBoResult result) {
+        if (result == null) return null;
+
+        var helpers = result.getQueryMultiBoResponseHelpers();
+        if (helpers == null || helpers.getValue() == null) return null;
+
+        var list = helpers.getValue().getQueryMultiBoResponseHelper();
+        if (list == null || list.isEmpty()) return null;
+
+        String recordId = value(list.get(0).getRecordId());
+        log.debug("extractFirstRecordIdFromMultiBo: {}", recordId);
+        return recordId;
+    }
+
+    public List<String> extractColumnValuesFromMultiBo(QueryMultiBoResult result, String columnName) {
+        List<String> values = new java.util.ArrayList<>();
+
+        if (result == null) return values;
+
+        var helpers = result.getQueryMultiBoResponseHelpers();
+        if (helpers == null || helpers.getValue() == null) return values;
+
+        for (var helper : helpers.getValue().getQueryMultiBoResponseHelper()) {
+            var columns = helper.getQueryMultiBoResponseColumns();
+            if (columns == null || columns.getValue() == null) continue;
+
+            for (var col : columns.getValue().getQueryMultiBoResponseColumn()) {
+                String name = value(col.getName());
+                if (name.equals(columnName)) {
+                    String val = value(col.getValue());
+                    if (val != null && !val.isEmpty()) {
+                        values.add(val);
+                    }
+                }
+            }
+        }
+
+        return values;
     }
 
     private TririgaWSPortType createPortWithBearer(String bearerToken) throws Exception {
