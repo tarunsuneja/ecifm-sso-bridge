@@ -13,6 +13,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import jakarta.xml.bind.JAXBElement;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -402,15 +403,15 @@ public class AcsHandlerController {
         if (helpers != null && helpers.getValue() != null) {
             for (var helper : helpers.getValue().getQueryMultiBoResponseHelper()) {
                 rowNum++;
-                sb.append("Row ").append(rowNum).append(": recordId=")
-                    .append(helper.getRecordId()).append("\n");
-                var columns = helper.getQueryMultiBoResponseColumns();
-                if (columns != null && columns.getValue() != null) {
-                    for (var col : columns.getValue().getQueryMultiBoResponseColumn()) {
-                        sb.append("  ").append(col.getName()).append(" = ")
-                            .append(col.getValue()).append("\n");
-                    }
-                }
+                        sb.append("Row ").append(rowNum).append(": recordId=")
+                            .append(val(helper.getRecordId())).append("\n");
+                        var columns = helper.getQueryMultiBoResponseColumns();
+                        if (columns != null && columns.getValue() != null) {
+                            for (var col : columns.getValue().getQueryMultiBoResponseColumn()) {
+                                sb.append("  ").append(val(col.getName())).append(" = ")
+                                    .append(val(col.getValue())).append("\n");
+                            }
+                        }
             }
         }
         sb.append("\n");
@@ -438,9 +439,9 @@ public class AcsHandlerController {
                 var rec = tririgaWsClient.getRecordDataHeader(id);
                 if (rec != null) {
                     sb.append("  id: ").append(rec.getId()).append("\n");
-                    sb.append("  name: ").append(rec.getName()).append("\n");
+                    sb.append("  name: ").append(val(rec.getName())).append("\n");
                     sb.append("  moduleId: ").append(rec.getModuleId()).append("\n");
-                    sb.append("  objectTypeName: ").append(rec.getObjectTypeName()).append("\n");
+                    sb.append("  objectTypeName: ").append(val(rec.getObjectTypeName())).append("\n");
                     if (rec.getGuiId() != null) {
                         sb.append("  guiId: ").append(rec.getGuiId()).append("\n");
                     }
@@ -625,7 +626,11 @@ public class AcsHandlerController {
     }
 
     private static String nvl(String s) {
-        return s != null ? s : "";
+        return s == null ? "" : s;
+    }
+
+    private static String val(JAXBElement<String> e) {
+        return e == null ? "" : e.getValue();
     }
 
     private String escapeHtml(String input) {
