@@ -63,7 +63,7 @@ public class MasGroupSyncService {
     @Value("${tririga.people.group-field-action:cstValidateADGroup}")
     private String peopleGroupFieldAction;
 
-    @Value("${tririga.people.status-column-name:Status}")
+    @Value("${tririga.people.status-column-name:triStatusCL}")
     private String statusColumnName;
 
     @Value("${tririga.people.active-status-value:Active User}")
@@ -186,12 +186,9 @@ public class MasGroupSyncService {
             sections.getIntegrationSection().add(section);
             integrationRecord.setSections(sections);
 
-            // NOTE: Not setting actionName — MAS Core denies transitions on managed records.
-            // The field value is saved directly; the reference project's workflow (cstValidateADGroup)
-            // is not compatible with MAS Core managed triPeople records.
-            //if (peopleGroupFieldAction != null && !peopleGroupFieldAction.isEmpty()) {
-            //    integrationRecord.setActionName(peopleGroupFieldAction);
-            //}
+            if (peopleGroupFieldAction != null && !peopleGroupFieldAction.isEmpty()) {
+                integrationRecord.setActionName(peopleGroupFieldAction);
+            }
 
             // Save via Business Connect
             ArrayOfIntegrationRecord records = new ArrayOfIntegrationRecord();
@@ -201,6 +198,8 @@ public class MasGroupSyncService {
             if (response != null && !response.isAnyFailed()) {
                 log.info("saveRecord succeeded for {}: total={}, successful={}",
                     email, response.getTotal(), response.getSuccessful());
+                boolean active = pollForActiveStatus(email);
+                log.info("pollForActiveStatus for {}: {}", email, active);
                 return true;
             }
 
