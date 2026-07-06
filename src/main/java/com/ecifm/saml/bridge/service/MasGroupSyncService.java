@@ -201,8 +201,6 @@ public class MasGroupSyncService {
             if (response != null && !response.isAnyFailed()) {
                 log.info("saveRecord succeeded for {}: total={}, successful={}",
                     email, response.getTotal(), response.getSuccessful());
-
-                pollForActiveStatus(email);
                 return true;
             }
 
