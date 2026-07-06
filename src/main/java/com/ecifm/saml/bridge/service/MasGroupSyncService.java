@@ -186,29 +186,37 @@ public class MasGroupSyncService {
             sections.getIntegrationSection().add(section);
             integrationRecord.setSections(sections);
 
-            if (peopleGroupFieldAction != null && !peopleGroupFieldAction.isEmpty()) {
-                integrationRecord.setActionName(peopleGroupFieldAction);
-            }
-
-            // Save via Business Connect
+            // Phase 1: Save without actionName (direct field write — confirmed working)
             ArrayOfIntegrationRecord records = new ArrayOfIntegrationRecord();
             records.getIntegrationRecord().add(integrationRecord);
 
-            ResponseHelperHeader response = tririgaWsClient.saveRecord(records);
-            if (response != null && !response.isAnyFailed()) {
-                log.info("saveRecord succeeded for {}: total={}, successful={}",
-                    email, response.getTotal(), response.getSuccessful());
-                boolean active = pollForActiveStatus(email);
-                log.info("pollForActiveStatus for {}: {}", email, active);
-                return true;
+            ResponseHelperHeader saveResponse = tririgaWsClient.saveRecord(records);
+            if (saveResponse == null || saveResponse.isAnyFailed()) {
+                log.warn("saveRecord failed for {}: anyFailed={}, total={}, successful={}, failed={}",
+                    email, saveResponse != null ? saveResponse.isAnyFailed() : "null",
+                    saveResponse != null ? saveResponse.getTotal() : -1,
+                    saveResponse != null ? saveResponse.getSuccessful() : -1,
+                    saveResponse != null ? saveResponse.getFailed() : -1);
+                return false;
             }
 
-            log.warn("saveRecord reported failure for {}: anyFailed={}, total={}, successful={}, failed={}",
-                email, response != null ? response.isAnyFailed() : "null",
-                response != null ? response.getTotal() : -1,
-                response != null ? response.getSuccessful() : -1,
-                response != null ? response.getFailed() : -1);
-            return false;
+            log.info("saveRecord succeeded for {}: total={}, successful={}",
+                email, saveResponse.getTotal(), saveResponse.getSuccessful());
+
+            // Phase 2: Call triggerActions separately to fire the workflow transition
+            if (peopleGroupFieldAction != null && !peopleGroupFieldAction.isEmpty()) {
+                ResponseHelperHeader triggerResponse = tririgaWsClient.triggerActions(peopleGroupFieldAction, recordId);
+                if (triggerResponse != null && !triggerResponse.isAnyFailed()) {
+                    log.info("triggerActions '{}' succeeded for recordId={}", peopleGroupFieldAction, recordId);
+                    boolean active = pollForActiveStatus(email);
+                    log.info("pollForActiveStatus for {}: {}", email, active);
+                } else {
+                    log.warn("triggerActions '{}' failed or returned anyFailed for recordId={} — field written but workflow not fired",
+                        peopleGroupFieldAction, recordId);
+                }
+            }
+
+            return true;
 
         } catch (Exception e) {
             log.error("Failed to update groups for {} via Business Connect: {}", email, e.getMessage(), e);

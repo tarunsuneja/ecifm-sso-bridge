@@ -30,6 +30,8 @@ import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfFilter;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationRecord;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfRecord;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfResponseHelper;
+import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfTriggerActions;
+import com.ecifm.saml.bridge.tririga.generated.dto.TriggerActions;
 import com.ecifm.saml.bridge.tririga.generated.dto.ResponseHelper;
 import com.ecifm.saml.bridge.tririga.generated.dto.Filter;
 import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationRecord;
@@ -284,6 +286,40 @@ public class TririgaWsClient {
             return result;
         } catch (Exception e) {
             log.error("saveRecord failed: {}", e.getMessage(), e);
+            return null;
+        }
+    }
+
+    public ResponseHelperHeader triggerActions(String actionName, long recordId) {
+        try {
+            TririgaWSPortType port = createPort();
+
+            TriggerActions action = new TriggerActions();
+            action.setActionName(actionName);
+            action.setRecordId(recordId);
+
+            ArrayOfTriggerActions arrayOfTriggerActions = new ArrayOfTriggerActions();
+            arrayOfTriggerActions.getTriggerActions().add(action);
+
+            ResponseHelperHeader result = port.triggerActions(arrayOfTriggerActions);
+            log.info("triggerActions('{}' on recordId={}): anyFailed={}, total={}, successful={}, failed={}",
+                actionName, recordId, result.isAnyFailed(), result.getTotal(), result.getSuccessful(), result.getFailed());
+            if (result.getResponseHelpers() != null) {
+                ArrayOfResponseHelper arr = result.getResponseHelpers().getValue();
+                if (arr != null && arr.getResponseHelper() != null) {
+                    for (ResponseHelper rh : arr.getResponseHelper()) {
+                        String status = rh.getStatus() != null ? rh.getStatus().getValue() : null;
+                        String val = rh.getValue() != null ? rh.getValue().getValue() : null;
+                        log.info("triggerActions responseHelper: key={}, name={}, recordId={}, status={}, value={}",
+                            rh.getKey() != null ? rh.getKey().getValue() : null,
+                            rh.getName() != null ? rh.getName().getValue() : null,
+                            rh.getRecordId(), status, val);
+                    }
+                }
+            }
+            return result;
+        } catch (Exception e) {
+            log.error("triggerActions failed for actionName='{}' recordId={}: {}", actionName, recordId, e.getMessage(), e);
             return null;
         }
     }
