@@ -11,9 +11,9 @@ SSO bridge (SAML) for eCIFM that validates Entra ID group membership during logi
 
 ## Key Constraints
 
-- **MAS Core managed records**: Workflow transitions (e.g. `cstValidateADGroup`) are **denied** by MAS Core on managed triPeople records → `saveRecord` with `actionName` fails with `PlatformRuntimeException`
-- **Fix**: `saveRecord` without `actionName` succeeds; field `cstNewADGroupTX` is written directly. `pollForActiveStatus` also removed since no workflow action runs.
-- The `peopleGroupFieldAction` (`cstValidateADGroup`) is still injected via `@Value` but **not used** (commented out in `MasGroupSyncService.java:189-192`)
+- **MAS Core managed records**: Workflow transitions (e.g. `cstValidateADGroup`) were previously denied by MAS Core on managed triPeople records → `saveRecord` with `actionName` failed with `PlatformRuntimeException`
+- **Current state**: The `cstValidateADGroup` workflow action is now **re-enabled** in `MasGroupSyncService.java` (lines 189-192). Polling for active status via `pollForActiveStatus` is also re-enabled.
+- If MAS Core still denies the transition, fallback: `saveRecord` without `actionName` writes field `cstNewADGroupTX` directly.
 
 ## Configuration (Configmap: `ecifm-bridge-config`)
 
