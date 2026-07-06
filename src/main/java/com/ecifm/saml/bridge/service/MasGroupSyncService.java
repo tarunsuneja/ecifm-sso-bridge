@@ -127,7 +127,7 @@ public class MasGroupSyncService {
         log.info("Groups differ for {}: TRIRIGA={}, Entra ID={}",
             email, tririgaGroupSet, entraGroupSet);
 
-        boolean ok = updatePeopleGroups(email, queryResult);
+        boolean ok = updatePeopleGroups(email, queryResult, entraGroupSet);
 
         if (ok) {
             log.info("Groups updated successfully for {}", email);
@@ -138,7 +138,7 @@ public class MasGroupSyncService {
         return new SyncResult(ok, tririgaGroups, resolvedGroups, true);
     }
 
-    private boolean updatePeopleGroups(String email, QueryMultiBoResult queryResult) {
+    private boolean updatePeopleGroups(String email, QueryMultiBoResult queryResult, Set<String> entraGroupSet) {
         try {
             String recordIdStr = tririgaWsClient.extractFirstRecordIdFromMultiBo(queryResult);
             if (recordIdStr == null || recordIdStr.isEmpty()) {
@@ -156,8 +156,7 @@ public class MasGroupSyncService {
             }
 
             // Build the group string (comma-separated list from Entra ID groups)
-            List<String> groups = tririgaWsClient.extractColumnValuesFromMultiBo(queryResult, queryGroupColumnName);
-            String groupString = String.join(",", new HashSet<>(groups));
+            String groupString = String.join(",", entraGroupSet);
 
             // Build IntegrationRecord following Business Connect pattern
             IntegrationRecord integrationRecord = new IntegrationRecord();
@@ -276,6 +275,38 @@ public class MasGroupSyncService {
             log.error("Failed to query TRIRIGA groups for {}: {}", email, e.getMessage(), e);
             return null;
         }
+    }
+
+    public SyncResult testSyncGroups(String email, List<String> testGroups) {
+        log.info("Test group sync for {} with groups: {}", email, testGroups);
+
+        if (testGroups == null || testGroups.isEmpty()) {
+            log.warn("No test groups provided for {}", email);
+            return new SyncResult(false, Collections.emptyList(), Collections.emptyList(), false);
+        }
+
+        Set<String> groupSet = testGroups.stream()
+            .filter(Objects::nonNull)
+            .map(String::trim)
+            .collect(Collectors.toSet());
+
+        QueryMultiBoResult queryResult = queryTririgaGroups(email);
+        if (queryResult == null) {
+            return new SyncResult(false, Collections.emptyList(), testGroups, false);
+        }
+
+        List<String> tririgaGroups = tririgaWsClient.extractColumnValuesFromMultiBo(queryResult, queryGroupColumnName);
+        Set<String> tririgaGroupSet = new HashSet<>(tririgaGroups);
+
+        if (groupSet.equals(tririgaGroupSet)) {
+            log.info("Test groups match current TRIRIGA groups for {} — no sync needed", email);
+            return new SyncResult(true, tririgaGroups, testGroups, false);
+        }
+
+        log.info("Test groups differ for {}: TRIRIGA={}, test={}", email, tririgaGroupSet, groupSet);
+        boolean ok = updatePeopleGroups(email, queryResult, groupSet);
+
+        return new SyncResult(ok, tririgaGroups, testGroups, ok);
     }
 
     public static class SyncResult {

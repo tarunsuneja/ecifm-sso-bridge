@@ -466,6 +466,27 @@ public class AcsHandlerController {
         return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(sb.toString());
     }
 
+    @GetMapping("/local/test-sync-groups")
+    public ResponseEntity<String> localTestSyncGroups(
+            @RequestParam(defaultValue = "tarun.suneja@ecifm.com") String email,
+            @RequestParam(defaultValue = "cst_ECIFM_All_Users_Facilities") String groups) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== Test Group Sync Pipeline ===\n");
+        sb.append("Email: ").append(email).append("\n");
+        sb.append("Groups: ").append(groups).append("\n\n");
+
+        List<String> groupList = List.of(groups.split("\\s*,\\s*"));
+        MasGroupSyncService.SyncResult result = masGroupSyncService.testSyncGroups(email, groupList);
+
+        sb.append("Result:\n");
+        sb.append("  success: ").append(result.isSuccess()).append("\n");
+        sb.append("  wasSynced: ").append(result.wasSynced()).append("\n");
+        sb.append("  tririgaGroups: ").append(result.getTririgaGroups()).append("\n");
+        sb.append("  resolvedGroups: ").append(result.getResolvedGroups()).append("\n");
+
+        return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(sb.toString());
+    }
+
     @GetMapping("/redirect")
     public ResponseEntity<String> ssoRedirect(
             @AuthenticationPrincipal OidcUser oidcUser,
