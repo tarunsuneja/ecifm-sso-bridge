@@ -26,6 +26,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.ecifm.saml.bridge.tririga.generated.dto.ApplicationInfo;
+import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfAvailableAction;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfFilter;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationRecord;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfRecord;
@@ -260,6 +261,21 @@ public class TririgaWsClient {
             return null;
         } catch (Exception e) {
             log.error("getRecordDataHeader failed for recordId={}: {}", recordId, e.getMessage(), e);
+            return null;
+        }
+    }
+
+    public ArrayOfAvailableAction getAvailableActions(long recordId) {
+        try {
+            TririgaWSPortType port = createPort();
+            com.ecifm.saml.bridge.tririga.generated.ws.ArrayOfLong ids = new com.ecifm.saml.bridge.tririga.generated.ws.ArrayOfLong();
+            ids.getLong().add(recordId);
+            ArrayOfAvailableAction result = port.getAvailableActions(ids);
+            log.info("getAvailableActions for recordId={}: {} available actions returned",
+                recordId, result != null && result.getAvailableAction() != null ? result.getAvailableAction().size() : 0);
+            return result;
+        } catch (Exception e) {
+            log.error("getAvailableActions failed for recordId={}: {}", recordId, e.getMessage(), e);
             return null;
         }
     }

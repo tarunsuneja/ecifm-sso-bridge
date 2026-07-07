@@ -33,6 +33,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import com.ecifm.saml.bridge.service.MasGroupSyncService;
 import com.ecifm.saml.bridge.service.MasSyncService;
 import com.ecifm.saml.bridge.service.TririgaWsClient;
+import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfAvailableAction;
+import com.ecifm.saml.bridge.tririga.generated.dto.AvailableAction;
+import com.ecifm.saml.bridge.tririga.generated.dto.Transition;
 import com.ecifm.saml.bridge.tririga.generated.dto.QueryMultiBoResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -94,6 +97,9 @@ public class AcsHandlerController {
 
     @Value("${tririga.people.group-field-action:cstValidateADGroup}")
     private String peopleGroupFieldAction;
+
+    @Value("${tririga.people.status-column-name:triStatusCL}")
+    private String statusColumnName;
 
     public AcsHandlerController(MasSyncService masSyncService, MasGroupSyncService masGroupSyncService, TririgaWsClient tririgaWsClient, ObjectMapper objectMapper) {
         this.masSyncService = masSyncService;
@@ -483,6 +489,72 @@ public class AcsHandlerController {
         sb.append("  wasSynced: ").append(result.wasSynced()).append("\n");
         sb.append("  tririgaGroups: ").append(result.getTririgaGroups()).append("\n");
         sb.append("  resolvedGroups: ").append(result.getResolvedGroups()).append("\n");
+
+        return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(sb.toString());
+    }
+
+    @GetMapping("/local/test-available-actions")
+    public ResponseEntity<String> localTestAvailableActions(
+            @RequestParam(defaultValue = "tarun.suneja@ecifm.com") String email) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== Available Actions ===\n");
+        sb.append("Email: ").append(email).append("\n\n");
+
+        // Step 1: Find record
+        sb.append("--- Step 1: Find record via named query ---\n");
+        QueryMultiBoResult queryResult = tririgaWsClient.runNamedQueryMultiBo(
+            queryProjectName, queryModuleName, queryObjectTypeName, queryName,
+            queryFilterField, email, queryFilterOperator, queryFilterDataType, 0, 1000);
+        if (queryResult == null) {
+            sb.append("FAILED: runNamedQueryMultiBo returned null\n");
+            return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(sb.toString());
+        }
+        String recordIdStr = tririgaWsClient.extractFirstRecordIdFromMultiBo(queryResult);
+        if (recordIdStr == null || recordIdStr.isEmpty()) {
+            sb.append("No record found for ").append(email).append("\n");
+            return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(sb.toString());
+        }
+        long recordId = Long.parseLong(recordIdStr);
+        sb.append("Record ID: ").append(recordId).append("\n\n");
+
+        // Step 2: Get current status from query
+        sb.append("--- Step 2: Current status ---\n");
+        List<String> statuses = tririgaWsClient.extractColumnValuesFromMultiBo(queryResult, statusColumnName);
+        sb.append("Status: ").append(statuses.isEmpty() ? "(empty)" : statuses.get(0)).append("\n");
+        List<String> groups = tririgaWsClient.extractColumnValuesFromMultiBo(queryResult, queryGroupColumnName);
+        sb.append("Current Groups: ").append(groups.isEmpty() ? "(empty)" : String.join(", ", groups)).append("\n\n");
+
+        // Step 3: Get available actions
+        sb.append("--- Step 3: getAvailableActions ---\n");
+        ArrayOfAvailableAction actions = tririgaWsClient.getAvailableActions(recordId);
+        if (actions == null) {
+            sb.append("FAILED: getAvailableActions returned null\n");
+            return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(sb.toString());
+        }
+        if (actions.getAvailableAction() == null || actions.getAvailableAction().isEmpty()) {
+            sb.append("No available actions returned\n");
+            return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(sb.toString());
+        }
+        for (AvailableAction aa : actions.getAvailableAction()) {
+            sb.append("Record ID: ").append(aa.getRecordId()).append("\n");
+            String state = aa.getCurrentState() != null ? aa.getCurrentState().getValue() : "(null)";
+            sb.append("Current State: ").append(state).append("\n");
+            sb.append("Available Transitions:\n");
+            var transitions = aa.getAvailableTransitions();
+            if (transitions != null && transitions.getValue() != null
+                    && transitions.getValue().getTransition() != null) {
+                for (Transition t : transitions.getValue().getTransition()) {
+                    String action = t.getAction() != null ? t.getAction().getValue() : "(null)";
+                    String label = t.getLabel() != null ? t.getLabel().getValue() : "(null)";
+                    String nextState = t.getNextState() != null ? t.getNextState().getValue() : "(null)";
+                    sb.append("  - action: ").append(action)
+                      .append(", label: ").append(label)
+                      .append(", nextState: ").append(nextState).append("\n");
+                }
+            } else {
+                sb.append("  (no transitions)\n");
+            }
+        }
 
         return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(sb.toString());
     }
