@@ -33,8 +33,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import com.ecifm.saml.bridge.service.MasGroupSyncService;
 import com.ecifm.saml.bridge.service.MasSyncService;
 import com.ecifm.saml.bridge.service.TririgaWsClient;
+import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfAssociation;
+import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfAssociationDefinition;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfAvailableAction;
 import com.ecifm.saml.bridge.tririga.generated.dto.AvailableAction;
+import com.ecifm.saml.bridge.tririga.generated.dto.Association;
+import com.ecifm.saml.bridge.tririga.generated.dto.AssociationDefinition;
 import com.ecifm.saml.bridge.tririga.generated.dto.Transition;
 import com.ecifm.saml.bridge.tririga.generated.dto.QueryMultiBoResult;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -555,6 +559,127 @@ public class AcsHandlerController {
                 sb.append("  (no transitions)\n");
             }
         }
+
+        return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(sb.toString());
+    }
+
+    @GetMapping("/local/test-associations")
+    public ResponseEntity<String> localTestAssociations(
+            @RequestParam(defaultValue = "tarun.suneja@ecifm.com") String email) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== Association Definitions for triPeople ===\n\n");
+
+        sb.append("--- Step 1: Find record ---\n");
+        QueryMultiBoResult queryResult = tririgaWsClient.runNamedQueryMultiBo(
+            queryProjectName, queryModuleName, queryObjectTypeName, queryName,
+            queryFilterField, email, queryFilterOperator, queryFilterDataType, 0, 1000);
+        if (queryResult == null) {
+            return ResponseEntity.ok(sb.append("FAILED: query returned null\n").toString());
+        }
+        String recordIdStr = tririgaWsClient.extractFirstRecordIdFromMultiBo(queryResult);
+        if (recordIdStr == null) {
+            return ResponseEntity.ok(sb.append("No record found\n").toString());
+        }
+        long recordId = Long.parseLong(recordIdStr);
+        sb.append("Record ID: ").append(recordId).append("\n\n");
+
+        sb.append("--- Step 2: getAssociationDefinitionsByName(triPeople, triPeople) ---\n");
+        ArrayOfAssociationDefinition defs = tririgaWsClient.getAssociationDefinitionsByName("triPeople", "triPeople");
+        if (defs != null && defs.getAssociationDefinition() != null) {
+            for (AssociationDefinition d : defs.getAssociationDefinition()) {
+                sb.append("  assocName: ").append(val(d.getAssociationName())).append("\n");
+                sb.append("  objTypeName: ").append(val(d.getObjectTypeName())).append("\n");
+                sb.append("  moduleName: ").append(val(d.getModuleName())).append("\n");
+                sb.append("  invAssocName: ").append(val(d.getInverseAssociationName())).append("\n");
+                sb.append("  srcModuleId: ").append(d.getSourceModuleId()).append("\n");
+                sb.append("  srcObjTypeId: ").append(d.getSourceObjectTypeId()).append("\n");
+                sb.append("  assocModuleId: ").append(d.getAssociatedModuleId()).append("\n");
+                sb.append("  assocObjTypeId: ").append(d.getAssociatedObjectTypeId()).append("\n");
+                sb.append("  ---\n");
+            }
+        } else {
+            sb.append("  (none returned)\n");
+        }
+        sb.append("\n");
+
+        sb.append("--- Step 3: getAssociatedRecords(recordId, 'Associated To', 100) ---\n");
+        ArrayOfAssociation assocs = tririgaWsClient.getAssociatedRecords(recordId, "Associated To", 100);
+        if (assocs != null && assocs.getAssociation() != null) {
+            for (Association a : assocs.getAssociation()) {
+                sb.append("  assocName: ").append(val(a.getAssociationName())).append("\n");
+                sb.append("  objTypeName: ").append(val(a.getObjectTypeName())).append("\n");
+                sb.append("  invAssocName: ").append(val(a.getInverseAssociationName())).append("\n");
+                for (var elem : a.getRest()) {
+                    if (elem != null) {
+                        sb.append("  rest: ").append(elem.getName().getLocalPart())
+                          .append(" = ").append(elem.getValue()).append("\n");
+                    }
+                }
+                sb.append("  ---\n");
+            }
+        } else {
+            sb.append("  (none returned)\n");
+        }
+
+        return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(sb.toString());
+    }
+
+    @GetMapping("/local/test-people-template-query")
+    public ResponseEntity<String> localTestPeopleTemplateQuery(
+            @RequestParam(defaultValue = "cst_ECIFM_All_Users_Facilities") String adGroup) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== People Template Query ===\n");
+        sb.append("AD Group: ").append(adGroup).append("\n\n");
+
+        sb.append("--- Query: cstPeople - Query - Get All the People Templates ---\n");
+        QueryMultiBoResult result = tririgaWsClient.runNamedQueryMultiBo(
+            queryProjectName, "triPeople", "triPeople",
+            "cstPeople - Query - Get All the People Templates",
+            "cstADGroupTX", adGroup, 10, 320, 0, 1000);
+        if (result == null) {
+            sb.append("FAILED: query returned null\n");
+            return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(sb.toString());
+        }
+        Integer total = result.getTotalResults();
+        sb.append("Total results: ").append(total != null ? total : 0).append("\n\n");
+
+        var helpers = result.getQueryMultiBoResponseHelpers();
+        if (helpers != null && helpers.getValue() != null) {
+            int row = 0;
+            for (var h : helpers.getValue().getQueryMultiBoResponseHelper()) {
+                row++;
+                sb.append("Row ").append(row).append(": recordId=").append(val(h.getRecordId())).append("\n");
+                var cols = h.getQueryMultiBoResponseColumns();
+                if (cols != null && cols.getValue() != null) {
+                    for (var c : cols.getValue().getQueryMultiBoResponseColumn()) {
+                        sb.append("  ").append(val(c.getName())).append(" = ").append(val(c.getValue())).append("\n");
+                    }
+                }
+            }
+        } else {
+            sb.append("  (no results)\n");
+        }
+
+        return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(sb.toString());
+    }
+
+    @GetMapping("/local/test-sync-associations")
+    public ResponseEntity<String> localTestSyncAssociations(
+            @RequestParam(defaultValue = "tarun.suneja@ecifm.com") String email,
+            @RequestParam(defaultValue = "cst_ECIFM_All_Users_Facilities") String groups) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== Test Sync Associations ===\n");
+        sb.append("Email: ").append(email).append("\n");
+        sb.append("Groups: ").append(groups).append("\n\n");
+
+        List<String> groupList = List.of(groups.split("\\s*,\\s*"));
+        MasGroupSyncService.SyncResult result = masGroupSyncService.testSyncGroups(email, groupList);
+
+        sb.append("Result:\n");
+        sb.append("  success: ").append(result.isSuccess()).append("\n");
+        sb.append("  wasSynced: ").append(result.wasSynced()).append("\n");
+        sb.append("  tririgaGroups: ").append(result.getTririgaGroups()).append("\n");
+        sb.append("  resolvedGroups: ").append(result.getResolvedGroups()).append("\n");
 
         return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(sb.toString());
     }

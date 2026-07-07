@@ -26,12 +26,15 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.ecifm.saml.bridge.tririga.generated.dto.ApplicationInfo;
+import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfAssociation;
+import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfAssociationDefinition;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfAvailableAction;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfFilter;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationRecord;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfRecord;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfResponseHelper;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfTriggerActions;
+import com.ecifm.saml.bridge.tririga.generated.dto.Association;
 import com.ecifm.saml.bridge.tririga.generated.dto.TriggerActions;
 import com.ecifm.saml.bridge.tririga.generated.dto.ResponseHelper;
 import com.ecifm.saml.bridge.tririga.generated.dto.Filter;
@@ -41,6 +44,7 @@ import com.ecifm.saml.bridge.tririga.generated.dto.QueryResult;
 import com.ecifm.saml.bridge.tririga.generated.dto.QueryResponseColumn;
 import com.ecifm.saml.bridge.tririga.generated.dto.QueryResponseHelper;
 import com.ecifm.saml.bridge.tririga.generated.dto.ResponseHelperHeader;
+import com.ecifm.saml.bridge.tririga.generated.dto.ObjectFactory;
 import com.ecifm.saml.bridge.tririga.generated.ws.TririgaWS;
 import com.ecifm.saml.bridge.tririga.generated.ws.TririgaWSPortType;
 
@@ -336,6 +340,59 @@ public class TririgaWsClient {
             return result;
         } catch (Exception e) {
             log.error("triggerActions failed for actionName='{}' recordId={}: {}", actionName, recordId, e.getMessage(), e);
+            return null;
+        }
+    }
+
+    public ResponseHelperHeader associateRecords(ArrayOfAssociation associations) {
+        try {
+            TririgaWSPortType port = createPort();
+            ResponseHelperHeader result = port.associateRecords(associations);
+            log.info("associateRecords: anyFailed={}, total={}, successful={}, failed={}",
+                result.isAnyFailed(), result.getTotal(), result.getSuccessful(), result.getFailed());
+            return result;
+        } catch (Exception e) {
+            log.error("associateRecords failed: {}", e.getMessage(), e);
+            return null;
+        }
+    }
+
+    public ResponseHelperHeader deassociateRecords(ArrayOfAssociation associations) {
+        try {
+            TririgaWSPortType port = createPort();
+            ResponseHelperHeader result = port.deassociateRecords(associations);
+            log.info("deassociateRecords: anyFailed={}, total={}, successful={}, failed={}",
+                result.isAnyFailed(), result.getTotal(), result.getSuccessful(), result.getFailed());
+            return result;
+        } catch (Exception e) {
+            log.error("deassociateRecords failed: {}", e.getMessage(), e);
+            return null;
+        }
+    }
+
+    public ArrayOfAssociation getAssociatedRecords(long recordId, String associationName, Integer maxResults) {
+        try {
+            TririgaWSPortType port = createPort();
+            ArrayOfAssociation result = port.getAssociatedRecords(recordId, associationName, maxResults);
+            int count = result != null && result.getAssociation() != null ? result.getAssociation().size() : 0;
+            log.info("getAssociatedRecords(recordId={}, association='{}'): {} results",
+                recordId, associationName, count);
+            return result;
+        } catch (Exception e) {
+            log.error("getAssociatedRecords(recordId={}, association='{}') failed: {}", recordId, associationName, e.getMessage(), e);
+            return null;
+        }
+    }
+
+    public ArrayOfAssociationDefinition getAssociationDefinitionsByName(String moduleName, String objectTypeName) {
+        try {
+            TririgaWSPortType port = createPort();
+            ArrayOfAssociationDefinition result = port.getAssociationDefinitionsByName(moduleName, objectTypeName);
+            int count = result != null && result.getAssociationDefinition() != null ? result.getAssociationDefinition().size() : 0;
+            log.info("getAssociationDefinitionsByName('{}', '{}'): {} definitions", moduleName, objectTypeName, count);
+            return result;
+        } catch (Exception e) {
+            log.error("getAssociationDefinitionsByName('{}', '{}') failed: {}", moduleName, objectTypeName, e.getMessage(), e);
             return null;
         }
     }

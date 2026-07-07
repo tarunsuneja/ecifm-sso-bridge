@@ -1,0 +1,31 @@
+Workflow: cstPeople - Synchronous - Apply Template to Employee and Consultant
+Triggered by: cstValidateADGroup action
+Status: Published
+Version: 5
+
+Start Condition:
+  (cstNewADGroupTX != cstCurrentADGroupTX) || cstNewADGroupTX == ""
+
+Steps:
+1. Query "cstPeople - Query - Get All the People Templates" (triPeople, filter: cstADGroupTX != "")
+2. Filter templates where cstADGroupTX == cstNewADGroupTX
+3. If match found -> use it
+4. Else -> fallback to template where triLastNameTX == "Request Central"
+5. If record state = triActive AND template found -> trigger triRevise
+6. Get existing "System.Group Details" records via "Associated To" association
+7. Get existing "System.Licence Details" records via "Associated To" association
+8. If existing groups/licenses exist AND template found:
+   a. Delete each Group Detail from triGroupsDetails section
+   b. Delete each Licence Detail from triLicenceDetails section
+   c. Clear triMenuLI, triHomePageLI
+9. If template found AND formLabel in ("Employee", "Consultant"):
+   a. cstPreviousADGroupTX = cstCurrentADGroupTX
+   b. cstCurrentADGroupTX = cstNewADGroupTX
+   c. Copy triHomePageLI, triMenuLI from template
+   d. Get Group Details from template's triGroupsDetails reference
+   e. Create new Group Details (copy User Group field)
+   f. Add to triPeople.triGroupsDetails section
+   g. Get Licence Details from template's triLicenceDetails reference
+   h. Create new Licence Details (copy User Licence field)
+   i. Add to triPeople.triLicenceDetails section
+   j. Trigger triActivate
