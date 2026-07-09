@@ -51,20 +51,11 @@ tririga:
     group-field-name: ${MAS_PEOPLE_GROUP_FIELD:}
     current-group-field-name: ${MAS_PEOPLE_CURRENT_GROUP_FIELD:cstCurrentADGroupTX}
     previous-group-field-name: ${MAS_PEOPLE_PREV_GROUP_FIELD:cstPreviousADGroupTX}
-    group-field-action: ${MAS_PEOPLE_GROUP_ACTION:cstValidateADGroup}
+    group-field-action: ${MAS_PEOPLE_GROUP_ACTION:triRevise}
     status-column-name: ${MAS_PEOPLE_STATUS_COLUMN:Status}
     active-status-value: ${MAS_PEOPLE_ACTIVE_STATUS:Active User}
     poll-max-retries: ${MAS_PEOPLE_POLL_RETRIES:6}
     poll-delay-ms: ${MAS_PEOPLE_POLL_DELAY:5000}
-  template:
-    module-name: ${MAS_TEMPLATE_MODULE:triPeople}
-    object-type-name: ${MAS_TEMPLATE_OBJECT_TYPE:triPeople}
-    query-name: ${MAS_TEMPLATE_QUERY_NAME:cstPeople - Query - Get All the People Templates}
-    filter-field: ${MAS_TEMPLATE_FILTER_FIELD:cstADGroupTX}
-    group-details-section: ${MAS_TEMPLATE_GROUP_DETAILS_SECTION:triGroupsDetails}
-    licence-details-section: ${MAS_TEMPLATE_LICENCE_DETAILS_SECTION:triLicenceDetails}
-    home-page-field: ${MAS_TEMPLATE_HOME_PAGE_FIELD:triHomePageLI}
-    menu-field: ${MAS_TEMPLATE_MENU_FIELD:triMenuLI}
 
 entra-id:
   graph:

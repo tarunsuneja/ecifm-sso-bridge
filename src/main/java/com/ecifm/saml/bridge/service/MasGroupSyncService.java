@@ -1,6 +1,5 @@
 package com.ecifm.saml.bridge.service;
 
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -9,22 +8,16 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import jakarta.xml.bind.JAXBElement;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfAssociation;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationField;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationRecord;
-import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationRows;
 import com.ecifm.saml.bridge.tririga.generated.dto.ArrayOfIntegrationSection1;
-import com.ecifm.saml.bridge.tririga.generated.dto.Association;
 import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationField;
 import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationRecord;
-import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationRows;
 import com.ecifm.saml.bridge.tririga.generated.dto.IntegrationSection;
 import com.ecifm.saml.bridge.tririga.generated.dto.ObjectFactory;
 import com.ecifm.saml.bridge.tririga.generated.dto.QueryMultiBoResult;
@@ -75,7 +68,7 @@ public class MasGroupSyncService {
     @Value("${tririga.people.previous-group-field-name:cstPreviousADGroupTX}")
     private String previousGroupFieldName;
 
-    @Value("${tririga.people.group-field-action:cstValidateADGroup}")
+    @Value("${tririga.people.group-field-action:triRevise}")
     private String peopleGroupFieldAction;
 
     @Value("${tririga.people.status-column-name:triStatusCL}")
@@ -89,30 +82,6 @@ public class MasGroupSyncService {
 
     @Value("${tririga.people.poll-delay-ms:5000}")
     private long pollDelayMs;
-
-    @Value("${tririga.template.module-name:triPeople}")
-    private String templateModuleName;
-
-    @Value("${tririga.template.object-type-name:triPeople}")
-    private String templateObjectTypeName;
-
-    @Value("${tririga.template.query-name:cstPeople - Query - Get All the People Templates}")
-    private String templateQueryName;
-
-    @Value("${tririga.template.filter-field:cstADGroupTX}")
-    private String templateFilterField;
-
-    @Value("${tririga.template.group-details-section:triGroupsDetails}")
-    private String groupDetailsSection;
-
-    @Value("${tririga.template.licence-details-section:triLicenceDetails}")
-    private String licenceDetailsSection;
-
-    @Value("${tririga.template.home-page-field:triHomePageLI}")
-    private String homePageField;
-
-    @Value("${tririga.template.menu-field:triMenuLI}")
-    private String menuField;
 
     public MasGroupSyncService(TririgaWsClient tririgaWsClient,
                                 EntraIdGroupResolver entraIdGroupResolver) {
@@ -200,12 +169,6 @@ public class MasGroupSyncService {
             List<String> currentGroups = tririgaWsClient.extractColumnValuesFromMultiBo(queryResult, queryGroupColumnName);
             String currentGroup = currentGroups.isEmpty() ? "" : currentGroups.get(0);
 
-            // Query People Template matching the new group
-            long templateId = findPeopleTemplate(groupString, email);
-            if (templateId == -1) {
-                log.warn("No People Template found for group '{}' — writing field only; activation may be incomplete", groupString);
-            }
-
             // Phase 1: Write fields via saveRecord
             // Write cstNewADGroupTX, shift current->previous, new->current
             List<IntegrationField> fieldUpdates = new ArrayList<>();
@@ -250,99 +213,14 @@ public class MasGroupSyncService {
             log.info("saveRecord field write succeeded for {}: total={}, successful={}",
                 email, saveResponse.getTotal(), saveResponse.getSuccessful());
 
-            // Phase 2: If template found, deassociate old group/license details and associate new ones
-            if (templateId != -1) {
-                // Remove existing child records (Group Details, Licence Details) associated via "Associated To"
-                ArrayOfAssociation existingDetails = tririgaWsClient.getAssociatedRecords(recordId, "Associated To", null);
-                if (existingDetails != null && existingDetails.getAssociation() != null) {
-                    List<Long> childIds = new ArrayList<>();
-                    for (Association a : existingDetails.getAssociation()) {
-                        Long childId = extractAssociatedRecordId(a);
-                        if (childId != null) {
-                            childIds.add(childId);
-                        }
-                    }
-                    if (!childIds.isEmpty()) {
-                        log.info("Removing {} existing associated detail records for recordId={}", childIds.size(), recordId);
-                        for (Long childId : childIds) {
-                            // Remove each via section row delete in triGroupsDetails section
-                            IntegrationRows deleteRow = new IntegrationRows();
-                            deleteRow.setAction("delete");
-                            deleteRow.setRecordId(childId);
-                            IntegrationSection rowSection = new IntegrationSection();
-                            rowSection.setName(groupDetailsSection);
-                            ArrayOfIntegrationRows rows = new ArrayOfIntegrationRows();
-                            rows.getIntegrationRows().add(deleteRow);
-                            rowSection.setRows(of.createIntegrationSectionRows(rows));
-                            ArrayOfIntegrationSection1 delSections = new ArrayOfIntegrationSection1();
-                            delSections.getIntegrationSection().add(rowSection);
-                            IntegrationRecord delRecord = new IntegrationRecord();
-                            delRecord.setId(recordId);
-                            delRecord.setModuleId(guiRecord.getModuleId());
-                            if (guiRecord.getObjectTypeName() != null) {
-                                delRecord.setObjectTypeName(guiRecord.getObjectTypeName().getValue());
-                            }
-                            if (guiRecord.getGuiId() != null) {
-                                delRecord.setGuiId(guiRecord.getGuiId());
-                            }
-                            delRecord.setSections(delSections);
-                            ArrayOfIntegrationRecord delRecords = new ArrayOfIntegrationRecord();
-                            delRecords.getIntegrationRecord().add(delRecord);
-                            ResponseHelperHeader delResponse = tririgaWsClient.saveRecord(delRecords);
-                            if (delResponse == null || delResponse.isAnyFailed()) {
-                                log.warn("Failed to delete child recordId={} from section", childId);
-                            } else {
-                                log.info("Deleted child recordId={} from section", childId);
-                            }
-                        }
-                    }
-                }
-
-                // Copy template's child records (Group Details) to user
-                ArrayOfAssociation templateDetails = tririgaWsClient.getAssociatedRecords(templateId, "Associated To", null);
-                if (templateDetails != null && templateDetails.getAssociation() != null) {
-                    for (Association a : templateDetails.getAssociation()) {
-                        Long templateChildId = extractAssociatedRecordId(a);
-                        if (templateChildId != null) {
-                            IntegrationRows addRow = new IntegrationRows();
-                            addRow.setAction("add");
-                            addRow.setRecordId(templateChildId);
-                            IntegrationSection rowSection = new IntegrationSection();
-                            rowSection.setName(groupDetailsSection);
-                            ArrayOfIntegrationRows rows = new ArrayOfIntegrationRows();
-                            rows.getIntegrationRows().add(addRow);
-                            rowSection.setRows(of.createIntegrationSectionRows(rows));
-                            ArrayOfIntegrationSection1 addSections = new ArrayOfIntegrationSection1();
-                            addSections.getIntegrationSection().add(rowSection);
-                            IntegrationRecord addRecord = new IntegrationRecord();
-                            addRecord.setId(recordId);
-                            addRecord.setModuleId(guiRecord.getModuleId());
-                            if (guiRecord.getObjectTypeName() != null) {
-                                addRecord.setObjectTypeName(guiRecord.getObjectTypeName().getValue());
-                            }
-                            if (guiRecord.getGuiId() != null) {
-                                addRecord.setGuiId(guiRecord.getGuiId());
-                            }
-                            addRecord.setSections(addSections);
-                            ArrayOfIntegrationRecord addRecords = new ArrayOfIntegrationRecord();
-                            addRecords.getIntegrationRecord().add(addRecord);
-                            ResponseHelperHeader addResponse = tririgaWsClient.saveRecord(addRecords);
-                            if (addResponse == null || addResponse.isAnyFailed()) {
-                                log.warn("Failed to add child recordId={} to section for user", templateChildId);
-                            } else {
-                                log.info("Added child recordId={} to section for user", templateChildId);
-                            }
-                        }
-                    }
-                }
-
-                // Try triActivate
-                ResponseHelperHeader activateResponse = tririgaWsClient.triggerActions("triActivate", recordId);
-                if (activateResponse != null && !activateResponse.isAnyFailed()) {
-                    log.info("triActivate succeeded for recordId={}", recordId);
-                } else {
-                    log.warn("triActivate failed or returned anyFailed for recordId={}", recordId);
-                }
+            // Phase 2: Fire triRevise workflow action — TRIRIGA handles template/group detail logic
+            log.info("Triggering '{}' on recordId={} for {}", peopleGroupFieldAction, recordId, email);
+            ResponseHelperHeader triggerResponse = tririgaWsClient.triggerActions(peopleGroupFieldAction, recordId);
+            if (triggerResponse != null && !triggerResponse.isAnyFailed()) {
+                log.info("triggerActions '{}' succeeded for recordId={}", peopleGroupFieldAction, recordId);
+            } else {
+                log.warn("triggerActions '{}' failed or returned anyFailed for recordId={} — field written but workflow not fired",
+                    peopleGroupFieldAction, recordId);
             }
 
             // Phase 3: Poll for active status
@@ -357,50 +235,11 @@ public class MasGroupSyncService {
         }
     }
 
-    private static Long extractAssociatedRecordId(Association a) {
-        if (a == null || a.getRest() == null) return null;
-        for (JAXBElement<? extends Serializable> elem : a.getRest()) {
-            if (elem != null && "associatedRecordId".equals(elem.getName().getLocalPart())) {
-                Object val = elem.getValue();
-                if (val instanceof Number) {
-                    return ((Number) val).longValue();
-                }
-            }
-        }
-        return null;
-    }
-
     private IntegrationField buildField(String name, String value) {
         IntegrationField f = new IntegrationField();
         f.setName(name);
         f.setValue(value);
         return f;
-    }
-
-    private long findPeopleTemplate(String groupName, String email) {
-        try {
-            log.info("Looking up People Template for group '{}'", groupName);
-            QueryMultiBoResult result = tririgaWsClient.runNamedQueryMultiBo(
-                queryProjectName, templateModuleName, templateObjectTypeName, templateQueryName,
-                templateFilterField, groupName, queryFilterOperator, queryFilterDataType, 0, 1000);
-            if (result == null) {
-                log.warn("People Template query returned null for group '{}'", groupName);
-                return -1;
-            }
-            int total = result.getTotalResults() != null ? result.getTotalResults() : 0;
-            log.info("People Template query returned {} results for group '{}'", total, groupName);
-            String templateIdStr = tririgaWsClient.extractFirstRecordIdFromMultiBo(result);
-            if (templateIdStr == null || templateIdStr.isEmpty()) {
-                log.warn("No People Template found for group '{}'", groupName);
-                return -1;
-            }
-            long templateId = Long.parseLong(templateIdStr);
-            log.info("Found People Template: recordId={} for group '{}'", templateId, groupName);
-            return templateId;
-        } catch (Exception e) {
-            log.error("Error querying People Template for group '{}': {}", groupName, e.getMessage(), e);
-            return -1;
-        }
     }
 
     /**
